@@ -22,10 +22,10 @@ export function HomePage(props: { onNavigate: (route: Route) => void }) {
   return (
     <section className="page" aria-labelledby="home-title">
       <header className="page-head">
-        <h1 id="home-title">zcode-move</h1>
+        <h1 id="home-title">把 ZCode 配置搬到新电脑</h1>
         <p className="page-head-desc">
-          zcode-move · agent 软件个人资产迁移工具：把旧机器上的规则、技能、命令、记忆等资产，
-          打成带完整性校验的迁移包，安全恢复到新机器。
+          旧电脑上的规则、技能、命令、记忆等资产，先打包成带完整性校验的迁移包，
+          再在新电脑上恢复；替换前自动备份。
         </p>
       </header>
 
@@ -39,7 +39,7 @@ export function HomePage(props: { onNavigate: (route: Route) => void }) {
             <IconPack size={22} />
           </span>
           <h2>打包：旧机导出</h2>
-          <p>扫描本机 agent 资产，按档位勾选后压缩为 .zam 迁移包（含逐文件 SHA-256 清单）。</p>
+          <p>扫描本机 agent 资产，按档位勾选后压缩为 .zam 迁移包（含逐文件校验清单）。</p>
           <span className="feature-card-cta">开始打包 →</span>
         </button>
         <button
@@ -51,7 +51,7 @@ export function HomePage(props: { onNavigate: (route: Route) => void }) {
             <IconUnpack size={22} />
           </span>
           <h2>解包：新机恢复</h2>
-          <p>校验迁移包完整性，预览内容，dry-run 确认变更计划后再执行，替换前自动备份。</p>
+          <p>校验迁移包完整性，预览内容，试运行确认变更计划后再执行，替换前自动备份。</p>
           <span className="feature-card-cta">开始解包 →</span>
         </button>
       </div>

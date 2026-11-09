@@ -25,7 +25,7 @@ import { ProgressBar } from "../components/ProgressBar";
 import { StatusTag, SkipTag } from "../components/StatusTag";
 import { EmptyState } from "../components/EmptyState";
 import { useToast } from "../components/Toast";
-import { IconWarning } from "../components/icons";
+import { IconCheck, IconWarning } from "../components/icons";
 import { PathPicker } from "../components/PathPicker";
 import { addHistory } from "../components/history";
 import { joinPath } from "../components/paths";
@@ -89,6 +89,8 @@ export function UnpackWizard(props: {
   const [executing, setExecuting] = useState(false);
   const [report, setReport] = useState<ApplyReport | null>(null);
   const [applyError, setApplyError] = useState<AppErrorPayload | null>(null);
+  /** 执行明细表展开全部开关（默认仅展示前 20 条，长表格页避免无限拉长）。 */
+  const [showAllExecuted, setShowAllExecuted] = useState(false);
 
   // 第 6 步：路径适配（执行完成后进行，目标树此时已存在）
   const [detecting, setDetecting] = useState(false);
@@ -306,16 +308,17 @@ export function UnpackWizard(props: {
     setExecuting(true);
     setProgress(null);
     setApplyError(null);
+    setShowAllExecuted(false);
     const confirmed: ApplyPlan = { ...plan, confirmed_overrides: [...conflictChoice.ov] };
     apiCall<ApplyReport>(COMMANDS.executeApply, { plan: confirmed })
       .then((r) => {
         setReport(r);
         addHistory({
           kind: "unpack",
-          summary: `解包完成：复验 ${r.verified_files} 个文件`,
+          summary: `解包完成：校验 ${r.verified_files} 个文件`,
           location: r.target_root,
         });
-        toast.success("解包执行完成，写入文件已通过哈希复验。");
+        toast.success("解包执行完成，写入文件已逐文件校验无误。");
       })
       .catch((e: unknown) =>
         setApplyError(isAppError(e) ? e : { code: "internal", message: "执行失败" }),
@@ -436,7 +439,7 @@ export function UnpackWizard(props: {
       <header className="page-head">
         <h1 id="unpack-title">解包：把迁移包恢复到本机</h1>
         <p className="page-head-desc">
-          校验 → 预览 → 选模式 → dry-run 确认 → 执行 → 路径适配。任何替换前先备份，两模式都不删目标文件。
+          选包并校验 → 内容预览 → 恢复模式 → 计划确认 → 执行与报告 → 路径适配。任何替换前先备份，两模式都不删目标文件。
         </p>
       </header>
 
@@ -533,7 +536,12 @@ export function UnpackWizard(props: {
                   </h3>
                   <ul className="warn-list">
                     {manifest.warnings.map((w) => (
-                      <li key={w}>{w}</li>
+                      <li key={w}>
+                        <span className="warn-list-icon" aria-hidden="true">
+                          <IconWarning size={12} />
+                        </span>
+                        <span>{w}</span>
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -549,6 +557,7 @@ export function UnpackWizard(props: {
               type="button"
               className="btn btn-primary"
               disabled={!manifest || opening}
+              title={!manifest || opening ? "请先选择并校验迁移包" : undefined}
               onClick={() => setStep(1)}
             >
               下一步：预览内容
@@ -589,7 +598,7 @@ export function UnpackWizard(props: {
             </table>
           </div>
           <p className="secondary">
-            标记「需要路径适配」的文件内含旧机器的绝对路径；解包执行完成后，最后一步会生成逐条确认的替换建议。
+            标记「需要路径适配」的文件内含旧电脑的完整路径；解包执行完成后，最后一步会生成逐条确认的替换建议。
           </p>
           <footer className="wizard-footer">
             <button type="button" className="btn" onClick={() => setStep(0)}>
@@ -614,9 +623,19 @@ export function UnpackWizard(props: {
                 aria-pressed={mode === "overwrite"}
                 onClick={() => setMode("overwrite")}
               >
-                <span className="choice-card-title">覆盖模式</span>
+                {mode === "overwrite" && (
+                  <span className="choice-card-check" aria-hidden="true">
+                    <IconCheck size={14} />
+                  </span>
+                )}
+                <span className="choice-card-title">
+                  覆盖模式
+                  <span className="choice-card-warn-icon" aria-hidden="true">
+                    <IconWarning size={14} />
+                  </span>
+                </span>
                 <span className="choice-card-desc">
-                  目标已存在且内容不同的文件：先备份到 zam-backups，再用包内版本替换。
+                  目标已存在且内容不同的文件：先备份到备份文件夹（zam-backups），再用包内版本替换。
                 </span>
               </button>
               <button
@@ -625,6 +644,11 @@ export function UnpackWizard(props: {
                 aria-pressed={mode === "incremental"}
                 onClick={() => setMode("incremental")}
               >
+                {mode === "incremental" && (
+                  <span className="choice-card-check" aria-hidden="true">
+                    <IconCheck size={14} />
+                  </span>
+                )}
                 <span className="choice-card-title">增量模式（默认更稳）</span>
                 <span className="choice-card-desc">
                   冲突文件默认保留目标不动，可在下一步计划里逐条改判为替换；.md/.json
@@ -709,7 +733,7 @@ export function UnpackWizard(props: {
           {plan && !planning && (
             <div className="card stack">
               <p className="secondary">
-                以下是 dry-run 计划，<strong>尚未写入任何文件</strong>
+                以下是试运行计划，<strong>尚未写入任何文件</strong>
                 。确认无误后点「执行解包」才会真正改动目标目录。
               </p>
 
@@ -809,6 +833,7 @@ export function UnpackWizard(props: {
               type="button"
               className="btn btn-primary"
               disabled={!plan || planning}
+              title={!plan || planning ? "请等待变更计划生成" : undefined}
               onClick={() => setConfirmApply(true)}
             >
               执行解包
@@ -913,7 +938,7 @@ export function UnpackWizard(props: {
                     </tr>
                   </thead>
                   <tbody>
-                    {report.executed.slice(0, 20).map((i) => (
+                    {(showAllExecuted ? report.executed : report.executed.slice(0, 20)).map((i) => (
                       <tr key={i.target_rel}>
                         <td className="mono">{i.target_rel}</td>
                         <td className="center">{actionLabel(i.action)}</td>
@@ -930,7 +955,20 @@ export function UnpackWizard(props: {
                 </table>
               </div>
               {report.executed.length > 20 && (
-                <p className="muted">仅展示前 20 条，共 {report.executed.length} 条。</p>
+                <div className="list-more">
+                  <span className="muted">
+                    {showAllExecuted
+                      ? `已展示全部 ${report.executed.length} 条`
+                      : `仅展示前 20 条，共 ${report.executed.length} 条。`}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setShowAllExecuted((v) => !v)}
+                  >
+                    {showAllExecuted ? "收起" : `展开全部 ${report.executed.length} 条`}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -970,13 +1008,13 @@ export function UnpackWizard(props: {
               </div>
             )}
             <p className="secondary">
-              文件已写入目标目录，现在检测其中的旧机绝对路径并逐条确认替换；只处理文本类文件，且替换前会先备份。
+              文件已写入目标目录，现在检测其中的旧电脑完整路径并逐条确认替换；只处理文本类文件，且替换前会先备份。
             </p>
 
             {needsAdaptCount === 0 && (
               <EmptyState
                 title="本包无需路径适配"
-                reason="迁移包内没有任何文件被标记为需要路径适配（不含旧机绝对路径的文本资产）。"
+                reason="迁移包内没有任何文件被标记为需要路径适配（不含旧电脑完整路径的文本资产）。"
                 nextStep="直接回到首页，本次解包已全部完成。"
               />
             )}
@@ -1004,7 +1042,7 @@ export function UnpackWizard(props: {
                         <th className="center">启用</th>
                         <th>旧机路径串</th>
                         <th>替换为（可编辑）</th>
-                        <th className="num">命中数</th>
+                        <th className="num">将替换处数</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1045,7 +1083,7 @@ export function UnpackWizard(props: {
                       {mappings.length === 0 && (
                         <tr>
                           <td colSpan={4} className="secondary">
-                            未检出旧机绝对路径，无需适配。
+                            未检出旧电脑的完整路径，无需适配。
                           </td>
                         </tr>
                       )}
@@ -1069,11 +1107,13 @@ export function UnpackWizard(props: {
                             <tr key={f.target_rel}>
                               <td className="mono">{f.target_rel}</td>
                               <td>
+                                {/* 界面只显示大白话结论；后端返回的原始技术原因放 title 悬浮 */}
                                 <span
                                   className="field-error"
                                   style={{ color: "var(--color-warning)" }}
+                                  title={f.skipped_reason ?? undefined}
                                 >
-                                  <IconWarning size={14} /> {f.skipped_reason}
+                                  <IconWarning size={14} /> 特殊格式，为安全起见已跳过
                                 </span>
                               </td>
                             </tr>
@@ -1091,7 +1131,7 @@ export function UnpackWizard(props: {
                   >
                     {pathfixReport.backup_dir && `替换前已备份到 ${pathfixReport.backup_dir}。`}
                     {pathfixReport.skipped.length > 0 &&
-                      `另有 ${pathfixReport.skipped.length} 个文件按规则跳过。`}
+                      `另有 ${pathfixReport.skipped.length} 个文件因格式特殊跳过（见上表）。`}
                   </Banner>
                 )}
 
@@ -1117,6 +1157,11 @@ export function UnpackWizard(props: {
                       type="button"
                       className="btn btn-primary"
                       disabled={enabledMappings.length === 0}
+                      title={
+                        enabledMappings.length === 0
+                          ? "没有启用的路径映射，无可替换内容"
+                          : undefined
+                      }
                       onClick={() => setConfirmPathfix(true)}
                     >
                       确认并执行路径替换（{enabledMappings.length} 条映射）
@@ -1168,10 +1213,10 @@ export function UnpackWizard(props: {
           },
           {
             label: "影响",
-            text: `预计替换 ${enabledMappings.reduce((s, m) => s + m.total_hits, 0)} 处旧机绝对路径`,
+            text: `预计替换 ${enabledMappings.reduce((s, m) => s + m.total_hits, 0)} 处旧电脑的完整路径`,
           },
-          { label: "后果", text: "替换写入目标文件前会先备份；含 BOM 或非 UTF-8 的文件自动跳过" },
-          { label: "目标状态", text: "文本资产中的旧机路径替换为本机路径，编码保持 UTF-8 无 BOM" },
+          { label: "后果", text: "替换写入目标文件前会先备份；特殊格式的文件为安全起见自动跳过" },
+          { label: "目标状态", text: "文本资产中的旧电脑路径替换为本机路径，编码保持不变" },
         ]}
         confirmText="确认替换"
         onConfirm={doPathfix}
@@ -1189,18 +1234,15 @@ export function UnpackWizard(props: {
             text: targetRoot,
           },
           {
-            label: "对象",
-            text: `迁移包 ${plan?.items.length ?? 0} 个文件的 dry-run 计划`,
-          },
-          {
+            // 精简为四行：原「对象」行并入「影响」行首（少一行不丢信息）
             label: "影响",
-            text: `新增 ${groups.create.length} 个、替换 ${groups.replace.length} 个（先备份）、内容合并 ${groups.merge.length} 个（先备份）、跳过 ${groups.skip_same.length} 个、保留 ${groups.keep.length} 个`,
+            text: `迁移包共 ${plan?.items.length ?? 0} 个文件：新增 ${groups.create.length} 个、替换 ${groups.replace.length} 个（先备份）、内容合并 ${groups.merge.length} 个（先备份）、跳过 ${groups.skip_same.length} 个、保留 ${groups.keep.length} 个`,
           },
           {
             label: "后果",
             text:
               groups.replace.length > 0 || groups.merge.length > 0
-                ? "被替换与被合并的目标文件会先备份到 zam-backups，可从备份恢复；本操作不删除任何目标文件"
+                ? "被替换与被合并的目标文件会先备份到备份文件夹，可从备份恢复；本操作不删除任何目标文件"
                 : "只新增文件，不改动任何已有内容",
           },
           {
@@ -1279,7 +1321,7 @@ function actionLabel(action: string): string {
     case "create":
       return "新增";
     case "skip_same":
-      return "一致跳过";
+      return "内容一致";
     case "replace":
       return "备份后替换";
     case "keep":
@@ -1302,17 +1344,20 @@ function mergePreviewSummary(item: PlanItem): string {
   return `新增 ${p.added_keys.length} 个字段${conflicts > 0 ? ` · ${conflicts} 处同字段冲突取旧机值` : ""}`;
 }
 
-/** 普通计划行列表（新增/跳过组）。 */
+/** 普通计划行列表（新增/跳过组）。默认仅渲染前 10 条，可展开全部/收起。 */
 function ItemList(props: {
   items: { target_rel: string; size: number }[];
   empty: string;
 }) {
+  // useState 置于早退 return 之前，保证 Hook 调用顺序稳定
+  const [expanded, setExpanded] = useState(false);
   if (props.items.length === 0) return <p className="muted">{props.empty}</p>;
+  const shown = expanded ? props.items : props.items.slice(0, 10);
   return (
     <div className="table-shell">
       <table className="data-table">
         <tbody>
-          {props.items.slice(0, 10).map((i) => (
+          {shown.map((i) => (
             <tr key={i.target_rel}>
               <td className="mono">{i.target_rel}</td>
               <td className="num">{formatBytes(i.size)}</td>
@@ -1321,9 +1366,20 @@ function ItemList(props: {
         </tbody>
       </table>
       {props.items.length > 10 && (
-        <p className="muted" style={{ padding: "var(--space-2) var(--space-4)" }}>
-          仅展示前 10 条，共 {props.items.length} 条。
-        </p>
+        <div className="list-more">
+          <span className="muted">
+            {expanded
+              ? `已展示全部 ${props.items.length} 条`
+              : `仅展示前 10 条，共 ${props.items.length} 条。`}
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "收起" : `展开全部 ${props.items.length} 条`}
+          </button>
+        </div>
       )}
     </div>
   );

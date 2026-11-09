@@ -1,6 +1,6 @@
 // 顶部横幅通道（消息四通道之一）：重要且需要用户介入的信息，持久显示至手动关闭。
 import type { ReactNode } from "react";
-import { IconClose, IconError, IconInfo, IconWarning } from "./icons";
+import { IconCheck, IconClose, IconError, IconInfo, IconWarning } from "./icons";
 
 export type BannerKind = "info" | "warning" | "danger" | "success";
 
@@ -8,7 +8,8 @@ const KIND_ICON: Record<BannerKind, () => ReactNode> = {
   info: () => <IconInfo size={18} />,
   warning: () => <IconWarning size={18} />,
   danger: () => <IconError size={18} />,
-  success: () => <IconInfo size={18} />,
+  // 成功类用对勾图标，与状态标签/Toast 的成功语义一致
+  success: () => <IconCheck size={18} />,
 };
 
 export function Banner(props: {

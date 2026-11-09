@@ -19,7 +19,7 @@ import { WizardSteps } from "../components/WizardSteps";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatusTag, SkipTag } from "../components/StatusTag";
 import { useToast } from "../components/Toast";
-import { IconWarning } from "../components/icons";
+import { IconCheck, IconWarning } from "../components/icons";
 import { PathPicker } from "../components/PathPicker";
 import { addHistory } from "../components/history";
 import { joinPath } from "../components/paths";
@@ -46,6 +46,24 @@ function suggestedFileName(profileId: string): string {
 
 function isAppError(e: unknown): e is AppErrorPayload {
   return typeof e === "object" && e !== null && "code" in e && "message" in e;
+}
+
+/** 凭据随包警告的共同句式（字符串来自档案 pack_warning 数据，前端只做展示层合并）。 */
+const CRED_WARNING_PREFIX = "本包含 API 凭据：";
+const CRED_WARNING_SUFFIX = "将随包迁移，请妥善保管迁移包";
+
+/** 展示层合并：同句式的凭据随包警告并为一条（列举各字段），其余警告原样保留。 */
+function mergeCredentialWarnings(list: string[]): string[] {
+  const isCred = (w: string) =>
+    w.startsWith(CRED_WARNING_PREFIX) && w.endsWith(CRED_WARNING_SUFFIX);
+  const fields = list
+    .filter(isCred)
+    .map((w) =>
+      w.slice(CRED_WARNING_PREFIX.length, w.length - CRED_WARNING_SUFFIX.length).trim(),
+    );
+  const rest = list.filter((w) => !isCred(w));
+  if (fields.length === 0) return rest;
+  return [`${CRED_WARNING_PREFIX}${fields.join("、")}，${CRED_WARNING_SUFFIX}`, ...rest];
 }
 
 export function PackWizard(props: {
@@ -239,7 +257,7 @@ export function PackWizard(props: {
         list.push(w);
       }
     }
-    return list;
+    return mergeCredentialWarnings(list);
   }, [selectedCategories, categoryTable]);
 
   /** 警告清单：显式跳过的阻断类 + 档位应含但因阻断未入包的类别（与横幅承诺一致）。 */
@@ -309,7 +327,7 @@ export function PackWizard(props: {
           summary: `打包完成：${r.manifest.counts.files} 个文件 · ${formatBytes(r.package_bytes)}`,
           location: r.output_path,
         });
-        toast.success(`迁移包已生成：${r.output_path}`);
+        toast.success(`迁移包已生成，保存在 ${r.output_path}`);
       })
       .catch((e: unknown) => {
         setPackError(isAppError(e) ? e : { code: "internal", message: "打包失败" });
@@ -363,7 +381,7 @@ export function PackWizard(props: {
       <header className="page-head">
         <h1 id="pack-title">打包：把本机资产打成迁移包</h1>
         <p className="page-head-desc">
-          扫描 → 盘点 → 选档位 → 生成 .zam 迁移包。源目录全程只读，凭据与可再生缓存永不入包。
+          选择档案 → 盘点结果 → 档位与输出 → 执行打包。源目录全程只读，凭据与可再生缓存永不入包。
         </p>
       </header>
 
@@ -436,6 +454,7 @@ export function PackWizard(props: {
               type="button"
               className="btn btn-primary"
               disabled={!profile || !root.trim()}
+              title={!profile || !root.trim() ? "请先确认资产档案与根目录" : undefined}
               onClick={goStep2}
             >
               下一步：扫描盘点
@@ -455,7 +474,7 @@ export function PackWizard(props: {
                 <>
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn btn-sm btn-primary"
                     onClick={runScan}
                     disabled={scanning}
                   >
@@ -466,14 +485,14 @@ export function PackWizard(props: {
                     className="btn btn-sm"
                     onClick={() => skipBlocked(c)}
                   >
-                    跳过该库继续
+                    跳过该类别继续
                   </button>
                 </>
               }
             >
               {c.status.status === "blocked" ? c.status.detail : ""}
               请先完全退出 {profile?.display_name ?? "源程序"}{" "}
-              再重新检测；或跳过该库，其余资产照常打包（会记入警告清单）。
+              再重新检测；或跳过该类别，其余资产照常打包（会记入警告清单）。
             </Banner>
           ))}
           {scanError && (
@@ -556,6 +575,7 @@ export function PackWizard(props: {
               type="button"
               className="btn btn-primary"
               disabled={!scan || scanning}
+              title={!scan || scanning ? "请等待盘点完成" : undefined}
               onClick={() => setStep(2)}
             >
               下一步：选择档位与输出
@@ -576,7 +596,12 @@ export function PackWizard(props: {
             <Banner kind="warning" title="凭据随包迁移提醒">
               <ul className="warn-list">
                 {packWarnings.map((w) => (
-                  <li key={w}>{w}</li>
+                  <li key={w}>
+                    <span className="warn-list-icon" aria-hidden="true">
+                      <IconWarning size={12} />
+                    </span>
+                    <span>{w}</span>
+                  </li>
                 ))}
               </ul>
               不需要时可改用自定义档位，取消勾选对应类别。
@@ -591,6 +616,11 @@ export function PackWizard(props: {
                 aria-pressed={preset === "recommended"}
                 onClick={() => setPreset("recommended")}
               >
+                {preset === "recommended" && (
+                  <span className="choice-card-check" aria-hidden="true">
+                    <IconCheck size={14} />
+                  </span>
+                )}
                 <span className="choice-card-title">推荐（纯资产）</span>
                 <span className="choice-card-desc">
                   档案标记为推荐档的 {recommendedIds(categoryTable).length}{" "}
@@ -603,6 +633,11 @@ export function PackWizard(props: {
                 aria-pressed={preset === "full"}
                 onClick={() => setPreset("full")}
               >
+                {preset === "full" && (
+                  <span className="choice-card-check" aria-hidden="true">
+                    <IconCheck size={14} />
+                  </span>
+                )}
                 <span className="choice-card-title">完整（含会话历史）</span>
                 <span className="choice-card-desc">
                   全部 {fullIds(categoryTable).length}{" "}
@@ -616,6 +651,11 @@ export function PackWizard(props: {
                 aria-pressed={preset === "custom"}
                 onClick={() => setPreset("custom")}
               >
+                {preset === "custom" && (
+                  <span className="choice-card-check" aria-hidden="true">
+                    <IconCheck size={14} />
+                  </span>
+                )}
                 <span className="choice-card-title">自定义</span>
                 <span className="choice-card-desc">逐个类别勾选，完全由你决定带什么。</span>
               </button>
@@ -661,30 +701,30 @@ export function PackWizard(props: {
               </fieldset>
             )}
 
-            <p className="secondary">
-              将打包 {selectedCategories.length} 个类别：
-              {selectedCategories.map((id) => categoryLabel(categoryTable, id)).join("、") ||
-                "（未选择）"}
-            </p>
-
-            <div className="field">
-              <label className="field-label" htmlFor="pack-outdir">
-                迁移包保存到哪个文件夹
-              </label>
-              <PathPicker
-                kind="dir"
-                label="迁移包保存到哪个文件夹"
-                value={outDir}
-                placeholder="点击选择文件夹（默认取设置页的「默认输出目录」）"
-                onPick={(d) => {
-                  setOutDir(d);
-                  setOutputError(null);
-                }}
-              />
-              <p className="field-hint" id="pack-outdir-hint">
-                默认取设置页的「默认输出目录」，可改到 U 盘或同步盘。
-              </p>
+            <div className="pack-categories">
+              <span className="secondary">将打包 {selectedCategories.length} 个类别：</span>
+              {selectedCategories.length > 0 ? (
+                selectedCategories.map((id) => (
+                  <span key={id} className="category-chip">
+                    {categoryLabel(categoryTable, id)}
+                  </span>
+                ))
+              ) : (
+                <span className="muted">（未选择）</span>
+              )}
             </div>
+
+            <PathPicker
+              kind="dir"
+              label="迁移包保存到哪个文件夹"
+              value={outDir}
+              placeholder="点击选择文件夹（默认取设置页的「默认输出目录」）"
+              onPick={(d) => {
+                setOutDir(d);
+                setOutputError(null);
+              }}
+              hint="默认取设置页的「默认输出目录」，可改到 U 盘或同步盘。"
+            />
 
             <div className="field">
               <label className="field-label" htmlFor="pack-outname">
@@ -814,7 +854,12 @@ export function PackWizard(props: {
                   </h3>
                   <ul className="warn-list">
                     {result.manifest.warnings.map((w) => (
-                      <li key={w}>{w}</li>
+                      <li key={w}>
+                        <span className="warn-list-icon" aria-hidden="true">
+                          <IconWarning size={12} />
+                        </span>
+                        <span>{w}</span>
+                      </li>
                     ))}
                   </ul>
                 </div>

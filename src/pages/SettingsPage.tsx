@@ -123,6 +123,7 @@ export function SettingsPage() {
             type="button"
             className="btn btn-primary"
             disabled={!dirty || saving}
+            title={!dirty && !saving ? "修改目录后可保存" : undefined}
             onClick={save}
           >
             {saving ? "正在保存…" : "保存设置"}
@@ -134,9 +135,8 @@ export function SettingsPage() {
       <div className="card stack">
         <h2 className="card-title">备份策略（只读）</h2>
         <p className="secondary">
-          解包时凡是「替换已存在文件」，都会先把目标文件备份到
-          <span className="mono"> 目标根目录\zam-backups\时间戳\ </span>
-          下，可从备份手动恢复。
+          解包时凡是「替换已存在文件」，都会先把目标文件备份到目标目录下的备份文件夹（zam-backups，
+          位置形如<span className="mono"> 目标根目录\zam-backups\时间戳\ </span>），可从备份手动恢复。
         </p>
         <p className="secondary">
           备份目录保留最近 5 次执行记录；超出后不会静默删除，会在下次执行前提示你手动清理。

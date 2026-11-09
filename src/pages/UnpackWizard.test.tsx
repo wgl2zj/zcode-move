@@ -308,8 +308,10 @@ describe("解包向导：路径适配在执行之后（第 6 步）", () => {
     fireEvent.change(input, { target: { value: "C:\\Users\\newuser" } });
     expect(input).toHaveValue("C:\\Users\\newuser");
 
-    // 被跳过文件行内提示原因
-    expect(screen.getByText(/包含 BOM 或非 UTF-8 编码/)).toBeInTheDocument();
+    // 被跳过文件行内提示大白话结论；原始技术原因（含 BOM 等）放 title 悬浮
+    const skipReason = screen.getByText("特殊格式，为安全起见已跳过", { selector: "span" });
+    expect(skipReason).toBeInTheDocument();
+    expect(skipReason.getAttribute("title")).toContain("BOM");
 
     // 确认执行路径替换：不带 backup 参数（后端已移除）
     fireEvent.click(screen.getByRole("button", { name: /确认并执行路径替换/ }));

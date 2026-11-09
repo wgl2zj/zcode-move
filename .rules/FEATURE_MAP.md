@@ -259,3 +259,46 @@
 ### 反直觉/易误解（踩坑预警）
 - `npm run build`（开发构建，只更新 dist/）与 `npm run build:installer`（出安装包，内含前者）是两回事；产物未变化不代表安装包未变化。
 - 构建缓存的键含下载 URL：镜像与 GitHub 的缓存互不通用，切换镜像来源会触发重新下载。
+
+## 任务控制（锁与取消，0.3.0）
+
+**主代码**：`electron/taskGuard.ts`（单任务锁与取消标记，纯逻辑）、`electron/engine/opts.ts`（取消检查点）、`electron/main.ts`（handleTask 装配）
+
+### 一句话定位
+主进程长任务互斥与协作取消的唯一通道；全部向导长命令（scan/pack/open/plan/execute/detect/pathfix）经它串行化并支持取消。
+
+### 行为预期（可验证，已逐条核实代码 2026-11-09）
+1. **单任务锁**：任一长任务执行期间再次发起任一长任务 → `task_busy` 拒绝（测试 `taskguard_busy_rejects_second_acquire` 锁定）。
+2. **协作取消**：`cancel_task` 设标记，引擎各主循环迭代头检查抛 `task_cancelled`（进度回调次数不变，openPackage 既有次数锁不受影响）；锁在 finally 释放且取消标记复位。
+3. **打包半成品清理**：取消/写失败时输出 `.zam` 被 finally unlink，不留残骸（测试 `robustness_pack_cancel_removes_partial_package`）。
+4. **解包中断语义**：执行取消时已写文件保留、后续未写（测试 `robustness_execute_cancel_keeps_written_files`）；UI 横幅明示"已写入保持现状"。
+5. **前端锁导航**：向导 busy 期间侧边栏与"回到首页"禁用（`App.tsx` taskBusy），出口是各进度区的取消按钮（二次确认）。
+
+### 反直觉/易误解（踩坑预警）
+- `handleTask` 与 `handle` 都是合法装配形态；`ipc.test.ts` 静态核对两者都认（0.3.0 起更新）。
+- 扫描器遇断链 junction/symlink（目标已删）**跳过不中断**（真实事故：本机 .codex 插件缓存 latest 断链曾致 smoke 失败；测试 `robustness_scan_skips_broken_junction` 锁定）。
+
+## 辅助命令（0.3.0：path_exists / reveal_path / copy_text / cleanup_earliest_backup）
+
+**主代码**：`electron/commands.ts`（pathExists/cleanupEarliestBackup）、`electron/main.ts`（shell/clipboard 装配）
+
+### 一句话定位
+打包查重、打开文件夹、复制路径、备份一键清理四个轻量配套命令；UI 挂接点分布在两向导。
+
+### 行为预期（可验证，已逐条核实代码 2026-11-09）
+1. **path_exists**：存在 true / 不存在 false（测试 `commands_path_exists`）；UI：打包输出目标已存在 → 危险确认框，确认后才覆盖（页面测试"覆盖确认（H3 锁）"）。
+2. **cleanup_earliest_backup**：只删 targetRoot/zam-backups 下目录名匹配 `YYYYMMDD-HHMMSS` 的字典序最早一个；杂名目录不动；无合格目录报 path_setup（测试 `commands_cleanup_earliest_backup*` 三例）；UI：备份超限警告卡"清理最早一次备份"→危险确认→执行→重新 plan 刷新提示。
+3. **reveal_path**：文件→资源管理器选中显示；目录→直接打开；不存在报 path_setup。挂接：打包成功卡"打开所在文件夹"、解包报告"打开备份文件夹"。
+4. **copy_text**：写系统剪贴板；挂接：打包成功卡"复制路径"。
+
+## 路径选择与操作反馈（0.3.0）
+
+**主代码**：`src/components/PathPicker.tsx`、两向导与设置页
+
+### 行为预期（可验证，已逐条核实代码 2026-11-09）
+1. **路径弹窗选择**：五个路径字段（打包资产根/打包输出目录/解包包文件/解包目标根/设置默认目录）为点击弹系统选择框的卡片，不再提供手敲长路径文本框；输出文件名单独输入（建议名精确到时分秒，手动编辑后不跟随档案切换）（组件测试 3 例 + 页面测试更新锁定）。
+2. **换包即失效**：解包第 1 步更换包文件后校验状态与全部后续产物作废，"打开并校验/重新校验"始终可用（页面测试 H4 锁用例）。
+3. **失败有出路**：执行失败横幅带"重新执行/返回修改"，无"可点但无效"的等待按钮（页面测试 H1 锁用例）；计划失败/检出失败有显式重试按钮。
+4. **目标根安全化**：resolve_target_root 失败时清空目标根并提示手选（不再静默停在 zcode 默认根）；设置页档案表失败显示错误+重试。
+5. **路径适配页主次**：执行替换为主按钮；未替换点"完成"弹拦截确认；完成后主按钮消失。
+6. **术语文案**：用户可见文案大白话化（试运行/逐文件校验/特殊格式/将替换处数/完整路径/备份文件夹）；选中卡片带对勾角标；长表页脚吸底常驻、明细可展开收起；确认对话框分级（普通=信息图标+蓝、危险=警示图标+红）。

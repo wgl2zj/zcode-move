@@ -1,0 +1,13 @@
+<!--
+  站点图标：品牌蓝圆角方块（取自 tokens.css 的 --color-brand）+
+  白色双向箭头，表达"打包搬出 / 解包搬入"的双向迁移意象。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#2f6fed" />
+  <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.5 12.5h12" />
+    <path d="m17 8.5 4 4-4 4" />
+    <path d="M23.5 19.5h-12" />
+    <path d="m15 15.5-4 4 4 4" />
+  </g>
+</svg>

@@ -15,10 +15,12 @@
   border: 0;
 }
 
-/* ---- 应用骨架：左侧边栏 + 右侧内容 ---- */
+/* ---- 应用骨架：左侧边栏 + 右侧内容 ----
+ * .app-shell 固定为视口高度，滚动收进 .content 内部：
+ * 长表格页的 .wizard-footer 用 sticky 吸底常驻，不随内容滚走。 */
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .sidebar {
@@ -99,6 +101,8 @@
   min-width: 0;
   padding: var(--space-6);
   max-width: 1080px;
+  /* 独立滚动容器：高度由 flex 拉伸撑满视口，页面级滚动改到这里 */
+  overflow-y: auto;
 }
 
 /* ---- 页面骨架 ---- */
@@ -595,6 +599,11 @@
   color: var(--color-warning-strong);
 }
 
+/* 普通确认（非危险）对话框的标题图标用进行中/信息蓝 */
+.dialog-head-icon-info {
+  color: var(--color-info);
+}
+
 .dialog-points {
   margin: 0;
   display: flex;
@@ -845,13 +854,23 @@
   margin-top: var(--space-2);
 }
 
-/* ---- 向导页脚 ---- */
+/* ---- 向导页脚 ----
+ * sticky 吸底：长内容时操作栏钉在滚动容器底部常驻可见；
+ * 不透明背景 + 上边框防止滚过的内容透出。
+ * bottom 为负值：Chromium 会把 sticky 约束矩形向内缩进滚动容器的
+ * padding（.content 底部内边距 32px），若 bottom:0 页脚盒底会停在
+ * 视口上方 32px 处、内容从缝隙透出；这里下移一个 --space-6 补偿，
+ * 使页脚盒底真正贴到视口底。滚到底时页脚回到自然位置，不受影响。 */
 .wizard-footer {
   display: flex;
   justify-content: space-between;
   gap: var(--space-3);
-  padding-top: var(--space-4);
+  padding: var(--space-4) 0 var(--space-2);
   border-top: 1px solid var(--color-border);
+  background: var(--color-bg-page);
+  position: sticky;
+  bottom: calc(-1 * var(--space-6));
+  z-index: 5;
 }
 
 .wizard-footer-stats {
@@ -881,6 +900,7 @@
   background: var(--color-bg-surface);
   cursor: pointer;
   min-height: 44px;
+  position: relative;
   transition:
     border-color var(--motion-duration-fast) var(--motion-ease),
     background var(--motion-duration-fast) var(--motion-ease);
@@ -896,11 +916,32 @@
   box-shadow: inset 0 0 0 1px var(--color-brand);
 }
 
+/* 选中态对勾角标：状态不只靠颜色（色弱友好），未选中不渲染 */
+.choice-card-check {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+}
+
 .choice-card-title {
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* 覆盖动作提示小图标（有覆盖行为的模式卡） */
+.choice-card-warn-icon {
+  display: inline-flex;
+  color: var(--color-warning-strong);
 }
 
 .choice-card-desc {
@@ -1103,9 +1144,55 @@
 
 .warn-list {
   margin: 0;
-  padding-left: var(--space-5);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   color: var(--color-warning);
   font-size: 13px;
+}
+
+/* 每条警告前的小警示图标：与阻断警告横幅同图形语言，不只靠文字 */
+.warn-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.warn-list-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+/* 长清单「展开全部/收起」行 */
+.list-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* 「将打包 N 个类别」小标签组（可换行） */
+.pack-categories {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-brand-border);
+  background: var(--color-brand-subtle);
+  color: var(--color-brand-active);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* ---- 路径选择卡片（0.3.0）：点击弹系统选择框，替代手敲长路径 ---- */

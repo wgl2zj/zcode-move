@@ -56,7 +56,7 @@ describe("打包向导步骤流转", () => {
     // WAL 阻断横幅可见，且提供两个动作
     expect(screen.getByText(/暂时无法打包/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "我已退出，重新检测" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "跳过该库继续" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "跳过该类别继续" })).toBeInTheDocument();
 
     // 前进到第 3 步：档位三卡可见；输出 = 目录选择卡片 + 文件名输入
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择档位与输出" }));
@@ -78,7 +78,7 @@ describe("打包向导步骤流转", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步：扫描盘点" }));
     await screen.findByText(/全局规则/);
 
-    fireEvent.click(screen.getByRole("button", { name: "跳过该库继续" }));
+    fireEvent.click(screen.getByRole("button", { name: "跳过该类别继续" }));
     await waitFor(() => {
       expect(screen.queryByText(/暂时无法打包/)).not.toBeInTheDocument();
     });
@@ -195,15 +195,14 @@ describe("打包向导：档案选择（仅 ZCode，产品收窄）", () => {
     await screen.findByText(/全局规则/);
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择档位与输出" }));
     await screen.findByText("推荐（纯资产）");
-    // v2：推荐档自动包含 provider_config/openviking_state → 凭据横幅点名具体字段（与后端同源）
+    // v2：推荐档自动包含 provider_config/openviking_state → 两条同句式凭据警告
+    // 合并为一条展示（列举两个字段），仍点名具体字段（数据与后端同源）
     expect(await screen.findByText("凭据随包迁移提醒")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "本包含 API 凭据：v2/provider_config.json 的 access.apiKey（嵌套字段）将随包迁移，请妥善保管迁移包",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("本包含 API 凭据：openviking/ 配置的 userKey 将随包迁移，请妥善保管迁移包"),
-    ).toBeInTheDocument();
+    const credBanner = screen.getByText("凭据随包迁移提醒").closest(".banner") as HTMLElement;
+    const warnItems = within(credBanner).getAllByRole("listitem");
+    expect(warnItems).toHaveLength(1);
+    expect(warnItems[0].textContent).toBe(
+      "本包含 API 凭据：v2/provider_config.json 的 access.apiKey（嵌套字段）、openviking/ 配置的 userKey，将随包迁移，请妥善保管迁移包",
+    );
   });
 });

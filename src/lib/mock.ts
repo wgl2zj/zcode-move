@@ -547,7 +547,7 @@ function mockDetect(profileId: string): DetectResult {
             {
               target_rel: "v2/config.json",
               total_hits: 0,
-              skipped_reason: "包含 BOM 或非 UTF-8 编码，已跳过并记入警告。",
+              skipped_reason: "特殊格式，为安全起见已跳过（原文件含 BOM 或非 UTF-8 编码），并已记入警告。",
             },
           ]
         : [{ target_rel: adaptFile, total_hits: 7, skipped_reason: null }],
@@ -621,7 +621,7 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
           { phase: "scanning", message: "正在扫描资产" },
           { phase: "packing", message: "压缩写入迁移包（24/58）" },
           { phase: "packing", message: "压缩写入迁移包（51/58）" },
-          { phase: "packing", message: "生成 manifest.json 清单" },
+          { phase: "packing", message: "生成包清单" },
           { phase: "done", message: "打包完成" },
         ],
         () => {
@@ -644,9 +644,9 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       return runWithProgress<Manifest>(
         "open",
         [
-          { phase: "verifying", message: "解析 manifest.json" },
-          { phase: "verifying", message: "逐文件校验 SHA-256（18/58）" },
-          { phase: "verifying", message: "逐文件校验 SHA-256（52/58）" },
+          { phase: "verifying", message: "解析包清单" },
+          { phase: "verifying", message: "逐文件校验（18/58）" },
+          { phase: "verifying", message: "逐文件校验（52/58）" },
           { phase: "done", message: "校验通过" },
         ],
         () => mockManifest(profileId),
@@ -668,8 +668,8 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       return runWithProgress<ApplyPlan>(
         "plan",
         [
-          { phase: "planning", message: "对比目标目录文件哈希" },
-          { phase: "planning", message: "生成 dry-run 变更计划" },
+          { phase: "planning", message: "逐个比对目标目录已有文件" },
+          { phase: "planning", message: "生成试运行变更计划" },
         ],
         () =>
           mockPlan(
@@ -690,7 +690,7 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
         [
           { phase: "applying", message: "备份将被替换的目标文件" },
           { phase: "applying", message: "写入迁移包文件（31/58）" },
-          { phase: "verifying", message: "逐文件复验 SHA-256" },
+          { phase: "verifying", message: "逐文件校验" },
           { phase: "done", message: "解包完成" },
         ],
         () => {
@@ -727,14 +727,14 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
         "pathfix",
         [
           { phase: "applying", message: "备份待替换文件" },
-          { phase: "applying", message: "执行路径替换（保持 UTF-8 无 BOM）" },
+          { phase: "applying", message: "执行路径替换（文件编码保持不变）" },
           { phase: "done", message: "路径替换完成" },
         ],
         () => ({
           replaced: [{ target_rel: adaptFile, replacements: 18 }],
           skipped:
             profileId === "zcode"
-              ? [{ target_rel: "v2/config.json", reason: "包含 BOM 或非 UTF-8 编码，已跳过。" }]
+              ? [{ target_rel: "v2/config.json", reason: "特殊格式，为安全起见已跳过（原文件含 BOM 或非 UTF-8 编码）。" }]
               : [],
           backup_dir: `${root}/zam-backups/20260817-101132`,
         }),

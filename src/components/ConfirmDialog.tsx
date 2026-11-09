@@ -1,7 +1,7 @@
 // 居中确认对话框（消息四通道之一）：高风险动作的统一"做决定"入口。
 // 持续显示对象 / 影响 / 后果 / 目标状态；焦点打开进弹窗、Esc 关闭、关闭归还触发器。
 import { useEffect, useRef, type ReactNode } from "react";
-import { IconWarning } from "./icons";
+import { IconInfo, IconWarning } from "./icons";
 
 export interface ConfirmPoint {
   /** 要点标签，如"对象""影响""后果""目标状态" */
@@ -85,11 +85,13 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         tabIndex={-1}
       >
         <div className="dialog-head">
-          {danger && (
-            <span className="dialog-head-icon">
-              <IconWarning size={20} />
-            </span>
-          )}
+          {/* 分级图标：危险=警告三角；普通确认=信息圈，标题左侧常驻图标 */}
+          <span
+            className={`dialog-head-icon${danger ? "" : " dialog-head-icon-info"}`}
+            aria-hidden="true"
+          >
+            {danger ? <IconWarning size={20} /> : <IconInfo size={20} />}
+          </span>
           <h2 id="confirm-dialog-title">{title}</h2>
         </div>
         <dl className="dialog-points">
