@@ -7,7 +7,7 @@ import { COMMANDS } from "../../electron/protocol";
 export { COMMANDS };
 
 /** 预加载层暴露的受控桥（contextBridge）。 */
-export interface AgentFerryBridge {
+export interface ZcodeMoveBridge {
   invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   listen: (event: string, handler: (e: { payload: unknown }) => void) => () => void;
   pickDirectory: (current?: string) => Promise<string | null>;
@@ -16,16 +16,16 @@ export interface AgentFerryBridge {
 
 declare global {
   interface Window {
-    agentferry?: AgentFerryBridge;
-    __AGENTFERRY_BRIDGE__?: boolean;
+    zcodemove?: ZcodeMoveBridge;
+    __ZCODE_MOVE_BRIDGE__?: boolean;
   }
 }
 
 /** 后端统一错误（AppError 序列化形态；主进程 reject {code,message}）。 */
 export type { AppErrorPayload } from "../../electron/protocol";
 
-function bridge(): AgentFerryBridge {
-  const b = window.agentferry;
+function bridge(): ZcodeMoveBridge {
+  const b = window.zcodemove;
   if (!b) throw new Error("桌面桥未就绪：当前非 Electron 环境或预加载脚本未加载");
   return b;
 }
@@ -55,7 +55,7 @@ export function useBackendEvent<T>(event: string, handler: (payload: T) => void)
   const ref = useRef(handler);
   ref.current = handler;
   useEffect(() => {
-    const b = window.agentferry;
+    const b = window.zcodemove;
     if (!b) return;
     return b.listen(event, (e) => ref.current(e.payload as T));
   }, [event]);

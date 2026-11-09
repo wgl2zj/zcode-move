@@ -34,8 +34,8 @@ function App() {
       <div className="app-shell">
         <nav className="sidebar" aria-label="主导航">
           <div className="brand">
-            <span className="brand-name">资产摆渡</span>
-            <span className="brand-sub">AgentFerry</span>
+            <span className="brand-name">zcode-move</span>
+            <span className="brand-sub">ZCode 配置备份与转移工具</span>
           </div>
           <ul className="nav-list">
             {NAV.map((item) => (

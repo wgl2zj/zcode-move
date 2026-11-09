@@ -32,12 +32,12 @@ describe("packaging_config_contract_locks_installer_shape", () => {
       (t) => t.target === "nsis" && t.arch.includes("x64"),
     );
     expect(hasNsisX64).toBe(true);
-    expect(pkg.build.win.artifactName).toBe("AgentFerry-Setup-${version}.exe");
+    expect(pkg.build.win.artifactName).toBe("zcode-move-Setup-${version}.exe");
   });
 
   it("appId/productName/输出目录已设，且输出目录被 gitignore 覆盖（产物不入库）", () => {
-    expect(pkg.build.appId).toBe("com.wgl2zj.agentferry");
-    expect(pkg.build.productName).toBe("AgentFerry");
+    expect(pkg.build.appId).toBe("com.wgl2zj.zcode-move");
+    expect(pkg.build.productName).toBe("zcode-move");
     expect(pkg.build.directories.output).toBe("release");
     const gitignore = readFileSync(join(process.cwd(), ".gitignore"), "utf8");
     expect(gitignore).toContain("release/");

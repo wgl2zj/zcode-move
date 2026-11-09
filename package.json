@@ -1,9 +1,13 @@
 {
-  "name": "agentferry",
+  "name": "zcode-move",
   "private": true,
   "version": "0.2.0",
   "description": "ZCode 配置备份与转移工具",
   "author": "wgl2zj",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wgl2zj/zcode-move.git"
+  },
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -41,14 +45,14 @@
     "vitest": "^3.2.4"
   },
   "build": {
-    "appId": "com.wgl2zj.agentferry",
-    "productName": "AgentFerry",
+    "appId": "com.wgl2zj.zcode-move",
+    "productName": "zcode-move",
     "directories": { "output": "release" },
     "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
     "electronDownload": { "mirror": "https://npmmirror.com/mirrors/electron/" },
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "artifactName": "AgentFerry-Setup-${version}.exe"
+      "artifactName": "zcode-move-Setup-${version}.exe"
     }
   }
 }

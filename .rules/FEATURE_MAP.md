@@ -234,7 +234,7 @@
 ## 构建与分发（installer）
 
 **主代码**：`package.json`（build 配置与 `build:installer` 命令）、`.npmrc`（打包工具链下载镜像）
-**模型/数据**：electron-builder 配置（NSIS x64）；产物 `release/AgentFerry-Setup-<package.json 版本>.exe`
+**模型/数据**：electron-builder 配置（NSIS x64）；产物 `release/zcode-move-Setup-<package.json 版本>.exe`
 **关联决策**：行为预期清单（2026-10-14 用户确认）；VERSION_HISTORY v0.2.0
 
 ### 一句话定位
@@ -246,7 +246,7 @@
 | `npm run build:installer` | 一键构建并产出 Windows 安装包到 release/（产物不入库） |
 
 ### 行为预期（可验证，已逐条核实代码与实跑）
-1. **产物形态**：`release/AgentFerry-Setup-<版本>.exe`，NSIS x64 单击安装（per-user，无需管理员），默认 Electron 图标（测试 `packaging_config_contract_locks_installer_shape` 锁定 artifactName 模板与 nsis x64 目标；2026-10-14 实跑产出 107MB 安装包）。
+1. **产物形态**：`release/zcode-move-Setup-<版本>.exe`，NSIS x64 单击安装（per-user，无需管理员），默认 Electron 图标（测试 `packaging_config_contract_locks_installer_shape` 锁定 artifactName 模板与 nsis x64 目标；2026-10-14 实跑产出 107MB 安装包，时名 AgentFerry-Setup，2026-11-09 更名 zcode-move 后按新名重建）。
 2. **打包范围**：files 显式锁定 dist/、dist-electron/ 与 package.json；生产依赖（yauzl/yazl 及传递依赖）由 electron-builder 自动打入 app.asar（2026-10-14 审查实拆 asar 核实，约 8MB——主进程另有 esbuild 预打包，两处并存功能自洽）（测试锁定 files 清单）。
 3. **下载镜像固化**：Electron 本体走 `build.electronDownload.mirror`、打包工具链走 `.npmrc` 的 npmmirror 镜像——国内网络 GitHub 直连拉不动（2026-10-14 实测：直连三次超时、镜像一次通过；镜像下载的缓存裸跑不认，故镜像必须进配置而非临时变量）（测试锁定 mirror 非空）。
 4. **产物不入库**：release/ 在 .gitignore（测试锁定）。

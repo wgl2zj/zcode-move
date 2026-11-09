@@ -15,7 +15,7 @@ let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    title: "资产摆渡 AgentFerry",
+    title: "zcode-move",
     width: 1200,
     height: 800,
     minWidth: 1024,
@@ -67,8 +67,8 @@ function registerCommands(): void {
   const appVersion = app.getVersion();
 
   handle(COMMANDS.appInfo, () => ({
-    name: "AgentFerry",
-    displayName: "资产摆渡",
+    name: "zcode-move",
+    displayName: "zcode-move",
     version: appVersion,
     packageFormat: "zam",
   }));
@@ -159,7 +159,7 @@ function registerCommands(): void {
     if (!win) throw new AppError("internal", "没有可用的应用窗口");
     const result = await dialog.showOpenDialog(win, {
       properties: ["openFile"],
-      filters: [{ name: "资产摆渡迁移包", extensions: ["zam"] }],
+      filters: [{ name: "zcode-move 迁移包", extensions: ["zam"] }],
       ...(typeof current === "string" && current.trim() ? { defaultPath: current.trim() } : {}),
     });
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];

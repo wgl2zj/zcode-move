@@ -22,6 +22,8 @@
 | 2026-10-13 | 产品收窄为仅 ZCode：注册中心单档案；codex/claude 档案定义保留，旧迁移包仍可解包（目标根推导兼容） | 提交 `98a5e3c` |
 | 2026-10-14 | 定位与复勘文档：README 改写、可行性研究复勘章节、功能地图档案条目同步、v1 spec 加"已替代"标注 | 提交 `24015b7` |
 | 2026-10-14 | 安装包链路建立：electron-builder（NSIS x64）+ `build:installer` 一键命令，产物 `release/`（不入库）；配置契约由 electron/packaging.test.ts 锁定 | 提交 `439ab83` |
+| 2026-11-09 | 程序与开源仓库更名：AgentFerry → zcode-move（窗口/界面/安装包名/appId/桌面桥名统一），安装包按新名重建，仓库同步改名 wgl2zj/zcode-move | 提交见本轮 git log |
+| 2026-11-09 | 发布 v0.2.0：GitHub Release 附 Windows 安装包 zcode-move-Setup-0.2.0.exe | [Release v0.2.0](https://github.com/wgl2zj/zcode-move/releases/tag/v0.2.0) |
 
 ## 说明
 

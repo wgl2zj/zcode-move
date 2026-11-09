@@ -1,4 +1,6 @@
-# 资产摆渡 AgentFerry
+# zcode-move
+
+> 原名 AgentFerry（资产摆渡，2026-08-18 开源基线 ~ 2026-11-08），2026-11-09 起更名 zcode-move。
 
 ZCode 配置备份与转移工具：在老机器上把 ZCode 的个人资产（全局规则、技能、命令、子代理定义、记忆、CLI 与 v2 配置、插件、记忆钩子、MCP、应用设置、模型服务商、机器人配置等）**扫描 → 打包**为 `.zam` 迁移包，换机后在新机器上**校验 → dry-run 预览 → 确认 → 解包**（覆盖/增量两种模式，先备份、逐文件哈希复验），完整复刻 ZCode 的功能与配置；对话/会话历史默认不打包，作为完整档可选项。解包后提供**路径适配**（旧机绝对路径 → 新机路径，用户逐条确认后替换）。
 
@@ -14,7 +16,7 @@ ZCode 配置备份与转移工具：在老机器上把 ZCode 的个人资产（�
 npm install            # 全部依赖
 npm run dev:electron   # 桌面应用开发模式（vite + electron 联动）
 npm run build          # 前端构建 + 主进程/预加载打包
-npm run build:installer # 一键产出 Windows 安装包（release/AgentFerry-Setup-<版本>.exe，产物不入库；下载镜像见 .npmrc 与 build.electronDownload，首次构建需联网约 200MB）
+npm run build:installer # 一键产出 Windows 安装包（release/zcode-move-Setup-<版本>.exe，产物不入库；下载镜像见 .npmrc 与 build.electronDownload，首次构建需联网约 200MB）
 npm test               # 全部 vitest（引擎 + 前端）
 ```
 

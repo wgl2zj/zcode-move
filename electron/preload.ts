@@ -29,6 +29,6 @@ const api = {
     ipcRenderer.invoke("dialog:pickPackage", current),
 };
 
-contextBridge.exposeInMainWorld("agentferry", api);
+contextBridge.exposeInMainWorld("zcodemove", api);
 // 渲染层据此判定"桌面真实模式 vs 浏览器演示模式"（mock.ts isMock）。
-contextBridge.exposeInMainWorld("__AGENTFERRY_BRIDGE__", true);
+contextBridge.exposeInMainWorld("__ZCODE_MOVE_BRIDGE__", true);

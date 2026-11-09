@@ -1,5 +1,5 @@
 // 浏览器演示模式 Mock 层 + 组件统一使用的 mock-aware 调用封装。
-// 桌面真实环境（预加载桥 window.agentferry 存在）：apiCall 直通 ipc.call、
+// 桌面真实环境（预加载桥 window.zcodemove 存在）：apiCall 直通 ipc.call、
 // useProgress 直通后端 progress 事件，行为与生产完全一致；
 // 纯浏览器（无桥）：返回内置演示数据，并按 ~2 秒节奏模拟进度事件，
 // 供开发预览与截图验收使用。组件不得绕过本模块直接 invoke/listen。
@@ -36,7 +36,7 @@ import {
 } from "./ipc";
 
 /** 是否处于浏览器演示模式（无桌面桥）。模块加载时判定一次，运行期不变。 */
-export const isMock = !window.agentferry;
+export const isMock = !window.zcodemove;
 
 /** 测试环境（vitest jsdom）下把演示节奏压缩到毫秒级，避免拖慢组件测试。
  *  浏览器演示可用 ?mocktick=毫秒 调节奏（如截图验收需放慢进度）。 */
@@ -73,7 +73,7 @@ export function useProgress(handler: ProgressHandler): void {
         progressHandlers.delete(h);
       };
     }
-    const dispose = window.agentferry!.listen("progress", (e) =>
+    const dispose = window.zcodemove!.listen("progress", (e) =>
       ref.current(e.payload as ProgressPayload),
     );
     return () => {
@@ -592,7 +592,7 @@ function delay<T>(value: T): Promise<T> {
 function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case COMMANDS.appInfo:
-      return delay({ name: "agentferry", displayName: "资产摆渡", version: "0.1.0" } as T);
+      return delay({ name: "zcode-move", displayName: "zcode-move", version: "0.1.0" } as T);
 
     case COMMANDS.listProfiles:
       return delay(
@@ -771,7 +771,7 @@ export function apiCall<T>(cmd: string, args?: Record<string, unknown>): Promise
  */
 export async function pickDirectory(current?: string): Promise<string | null> {
   if (!isMock) {
-    return window.agentferry!.pickDirectory(current?.trim() || undefined);
+    return window.zcodemove!.pickDirectory(current?.trim() || undefined);
   }
   return delay("D:\\迁移包");
 }
@@ -782,7 +782,7 @@ export async function pickDirectory(current?: string): Promise<string | null> {
  */
 export async function pickPackage(current?: string): Promise<string | null> {
   if (!isMock) {
-    return window.agentferry!.pickPackage(current?.trim() || undefined);
+    return window.zcodemove!.pickPackage(current?.trim() || undefined);
   }
   return delay(MOCK_PACKAGE);
 }

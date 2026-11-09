@@ -22,9 +22,9 @@ export function HomePage(props: { onNavigate: (route: Route) => void }) {
   return (
     <section className="page" aria-labelledby="home-title">
       <header className="page-head">
-        <h1 id="home-title">资产摆渡</h1>
+        <h1 id="home-title">zcode-move</h1>
         <p className="page-head-desc">
-          AgentFerry · agent 软件个人资产迁移工具：把旧机器上的规则、技能、命令、记忆等资产，
+          zcode-move · agent 软件个人资产迁移工具：把旧机器上的规则、技能、命令、记忆等资产，
           打成带完整性校验的迁移包，安全恢复到新机器。
         </p>
       </header>

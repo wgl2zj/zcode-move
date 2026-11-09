@@ -1,5 +1,5 @@
 // 最近任务记录：v1 用 localStorage 持久化打包/解包历史，首页展示。
-const STORAGE_KEY = "agentferry.recentTasks";
+const STORAGE_KEY = "zcodemove.recentTasks";
 
 export interface HistoryEntry {
   id: string;
