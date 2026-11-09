@@ -23,14 +23,22 @@ describe("IPC 命令名一致性", () => {
       "apply_path_mappings",
       "load_settings",
       "save_settings",
+      "cancel_task",
+      "path_exists",
+      "reveal_path",
+      "copy_text",
+      "cleanup_earliest_backup",
     ]);
   });
 
-  it("主进程 handle() 注册了全部命令（读 main.ts 静态核对，防 protocol 加键漏注册）", () => {
+  it("主进程 handle()/handleTask() 注册了全部命令（读 main.ts 静态核对，防 protocol 加键漏注册）", () => {
     const mainTs = readFileSync(MAIN_ENTRY, "utf-8");
     for (const key of Object.keys(COMMANDS)) {
-      expect(mainTs, `COMMANDS.${key} 未在 main.ts 的 handle() 装配中注册`).toContain(
-        `handle(COMMANDS.${key}`,
+      // handleTask 是长任务命令的带锁装配（内部最终也走 handle），两者都算已注册
+      const registered =
+        mainTs.includes(`handle(COMMANDS.${key}`) || mainTs.includes(`handleTask(COMMANDS.${key}`);
+      expect(registered, `COMMANDS.${key} 未在 main.ts 的 handle()/handleTask() 装配中注册`).toBe(
+        true,
       );
     }
   });

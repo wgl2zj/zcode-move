@@ -15,7 +15,7 @@ import {
   type ProfileSummary,
   type ProgressPayload,
 } from "../lib/ipc";
-import { apiCall, pickDirectory, pickPackage, useProgress } from "../lib/mock";
+import { apiCall, useProgress } from "../lib/mock";
 import { mergeStrategyFor } from "../../electron/engine/merge";
 import { formatBytes } from "../lib/format";
 import { Banner } from "../components/Banner";
@@ -26,6 +26,7 @@ import { StatusTag, SkipTag } from "../components/StatusTag";
 import { EmptyState } from "../components/EmptyState";
 import { useToast } from "../components/Toast";
 import { IconWarning } from "../components/icons";
+import { PathPicker } from "../components/PathPicker";
 import { addHistory } from "../components/history";
 import { joinPath } from "../components/paths";
 import { categoryLabel } from "../components/categoryNames";
@@ -50,7 +51,11 @@ function formatTime(iso: string): string {
   return d.toLocaleString("zh-CN", { hour12: false });
 }
 
-export function UnpackWizard(props: { onExit: () => void }) {
+export function UnpackWizard(props: {
+  onExit: () => void;
+  /** 长任务执行中上报给 App 锁导航（可选：测试不传不受影响）。 */
+  onBusyChange?: (busy: boolean) => void;
+}) {
   const toast = useToast();
   const [step, setStep] = useState(0);
 
@@ -72,7 +77,7 @@ export function UnpackWizard(props: { onExit: () => void }) {
   // 第 4 步：dry-run 计划
   const [plan, setPlan] = useState<ApplyPlan | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [planError, setPlanError] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<AppErrorPayload | null>(null);
   /** 冲突文件的处理选择：ov=备份后替换集合；mg=内容合并集合（merge 优先于 replace/keep）。 */
   const [conflictChoice, setConflictChoiceState] = useState<{ ov: Set<string>; mg: Set<string>}>({
     ov: new Set(),
@@ -88,10 +93,16 @@ export function UnpackWizard(props: { onExit: () => void }) {
   // 第 6 步：路径适配（执行完成后进行，目标树此时已存在）
   const [detecting, setDetecting] = useState(false);
   const [detect, setDetect] = useState<DetectResult | null>(null);
+  const [detectError, setDetectError] = useState<AppErrorPayload | null>(null);
   const [mappings, setMappings] = useState<MappingRow[]>([]);
   const [pathfixing, setPathfixing] = useState(false);
   const [pathfixReport, setPathfixReport] = useState<PathFixReport | null>(null);
   const [confirmPathfix, setConfirmPathfix] = useState(false);
+
+  // 确认框与任务控制（0.3.0）
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [confirmFinish, setConfirmFinish] = useState(false);
 
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
   const activeTask =
@@ -99,6 +110,24 @@ export function UnpackWizard(props: { onExit: () => void }) {
   useProgress((p) => {
     if (p.task === activeTask) setProgress(p);
   });
+
+  /** 执行中上报 App 锁导航；卸载时复位。 */
+  const busy = opening || planning || executing || detecting || pathfixing;
+  const onBusyChange = props.onBusyChange;
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
+
+  /** 请求取消当前长任务（后端循环检查点抛 task_cancelled）。 */
+  const doCancel = async () => {
+    setConfirmCancel(false);
+    try {
+      await apiCall<boolean>(COMMANDS.cancelTask);
+    } catch {
+      // 取消请求失败不打扰（任务可能刚好已结束）
+    }
+  };
 
   // 预填包路径 + 加载档案清单
   useEffect(() => {
@@ -108,7 +137,9 @@ export function UnpackWizard(props: { onExit: () => void }) {
         if (disposed) return;
         setPkgPath((prev) => prev || joinPath(s.default_output_dir, "迁移包.zam"));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!disposed) toast.warning("默认输出目录加载失败，请点击选择迁移包文件。");
+      });
     apiCall<ProfileSummary[]>(COMMANDS.listProfiles)
       .then((list) => {
         if (disposed) return;
@@ -116,7 +147,9 @@ export function UnpackWizard(props: { onExit: () => void }) {
         // 未选包前先以第一个档案根目录预填；打开包后按包内档案重填（见 openPackage）
         if (list[0]) setTargetRoot((prev) => prev || list[0].default_root);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!disposed) toast.warning("档案清单加载失败，包内类别名将显示原始标识。");
+      });
     return () => {
       disposed = true;
     };
@@ -141,10 +174,17 @@ export function UnpackWizard(props: { onExit: () => void }) {
     return inList ? (pkgProfile?.display_name ?? "…") : `${manifest.profile_id}（旧版档案）`;
   }, [manifest, profiles, pkgProfile]);
 
-  /** 弹系统文件选择框选 .zam 迁移包；取消不改动，选中后仍需手动点「打开并校验」。 */
-  const browsePackage = async () => {
-    const file = await pickPackage(pkgPath);
-    if (file) setPkgPath(file);
+  /** 选择迁移包文件（PathPicker 回调）：换包即作废已校验状态与全部后续产物
+   *  （2026-11-09 审查 H4：改路径后旧"校验通过"卡片不再误导）。 */
+  const pickPkgFile = (file: string) => {
+    if (file === pkgPath) return;
+    setPkgPath(file);
+    setManifest(null);
+    setPlan(null);
+    setReport(null);
+    setDetect(null);
+    setOpenError(null);
+    setApplyError(null);
   };
 
   const openPackage = () => {
@@ -165,7 +205,13 @@ export function UnpackWizard(props: { onExit: () => void }) {
                 targetDirtyRef.current && prev.trim() ? prev : root,
               );
             })
-            .catch(() => undefined);
+            .catch(() => {
+              // 推导失败不能静默停在错误目录（2026-11-09 审查 M5）：清空并让用户手选
+              setTargetRoot((prev) =>
+                targetDirtyRef.current && prev.trim() ? prev : "",
+              );
+              toast.warning("未能按包内档案自动定位恢复目录，请点击「选择文件夹」手动指定。");
+            });
         }
       })
       .catch((e: unknown) =>
@@ -185,26 +231,25 @@ export function UnpackWizard(props: { onExit: () => void }) {
       mergeRelPaths: [...mg],
     })
       .then((p) => setPlan(p))
-      .catch((e: unknown) => setPlanError(isAppError(e) ? e.message : "生成变更计划失败"))
+      .catch((e: unknown) =>
+        setPlanError(isAppError(e) ? e : { code: "internal", message: "生成变更计划失败" }),
+      )
       .finally(() => setPlanning(false));
   };
 
   const goPlanStep = () => {
     if (!targetRoot.trim()) {
-      toast.warning("请先填写恢复目标目录（默认取包内档案的本机资产根目录）。");
+      toast.warning("请先选择恢复目标目录（默认取包内档案的本机资产根目录）。");
       return;
     }
     setStep(3);
     runPlan(conflictChoice.ov, conflictChoice.mg);
   };
 
-  /** 弹系统目录选择框选恢复目标根目录；取消不改动。 */
-  const browseTarget = async () => {
-    const dir = await pickDirectory(targetRoot);
-    if (dir) {
-      setTargetRoot(dir);
-      targetDirtyRef.current = true;
-    }
+  /** 选择恢复目标目录（PathPicker 回调）；选择后视为手动指定，打开新包不再覆盖。 */
+  const pickTargetRoot = (dir: string) => {
+    setTargetRoot(dir);
+    targetDirtyRef.current = true;
   };
 
   /** 冲突行三态改判：保留目标 / 备份后替换 / 内容合并（仅 .md/.json 可选合并），改判触发重新 plan。
@@ -254,12 +299,13 @@ export function UnpackWizard(props: { onExit: () => void }) {
     [groups],
   );
 
-  const executeApply = () => {
+  /** 执行核心（确认对话框后与失败重试共用；不再触发确认）。 */
+  const executeCore = () => {
     if (!plan) return;
-    setConfirmApply(false);
     setStep(4);
     setExecuting(true);
     setProgress(null);
+    setApplyError(null);
     const confirmed: ApplyPlan = { ...plan, confirmed_overrides: [...conflictChoice.ov] };
     apiCall<ApplyReport>(COMMANDS.executeApply, { plan: confirmed })
       .then((r) => {
@@ -277,6 +323,11 @@ export function UnpackWizard(props: { onExit: () => void }) {
       .finally(() => setExecuting(false));
   };
 
+  const executeApply = () => {
+    setConfirmApply(false);
+    executeCore();
+  };
+
   /** 包内需要路径适配的文件数（来自 manifest 的逐文件标记）。 */
   const needsAdaptCount = useMemo(
     () => (manifest?.files ?? []).filter((f) => f.needs_path_adapt).length,
@@ -285,6 +336,7 @@ export function UnpackWizard(props: { onExit: () => void }) {
 
   const runDetect = () => {
     setDetecting(true);
+    setDetectError(null);
     apiCall<DetectResult>(COMMANDS.detectPathMappings, {
       path: pkgPath.trim(),
       targetRoot: targetRoot.trim(),
@@ -294,7 +346,12 @@ export function UnpackWizard(props: { onExit: () => void }) {
         setMappings(d.seeds.map((s) => ({ ...s, enabled: true })));
       })
       .catch((e: unknown) => {
-        toast.error(isAppError(e) ? e.message : "路径检出失败");
+        const err = isAppError(e) ? e : { code: "internal", message: "路径检出失败" };
+        if (err.code === "task_cancelled") {
+          toast.warning("已取消路径检出。");
+        } else {
+          setDetectError(err);
+        }
       })
       .finally(() => setDetecting(false));
   };
@@ -323,9 +380,42 @@ export function UnpackWizard(props: { onExit: () => void }) {
         toast.success(`路径替换完成：${r.replaced.length} 个文件、${n} 处替换，替换前已备份。`);
       })
       .catch((e: unknown) => {
-        toast.error(isAppError(e) ? e.message : "路径替换失败");
+        const err = isAppError(e) ? e : { code: "internal", message: "路径替换失败" };
+        if (err.code === "task_cancelled") {
+          toast.warning("已取消路径替换；已替换的文件保持现状。");
+        } else {
+          toast.error(err.message);
+        }
       })
       .finally(() => setPathfixing(false));
+  };
+
+  /** 备份一键清理（2026-11-09 审查 M7）：只删最早一次时间戳备份，删除前确认。 */
+  const doCleanup = async () => {
+    setConfirmCleanup(false);
+    if (!plan) return;
+    try {
+      const r = await apiCall<{ removed_dir: string; removed_files: number; remaining: number }>(
+        COMMANDS.cleanupEarliestBackup,
+        { targetRoot: plan.target_root },
+      );
+      toast.success(
+        `已清理最早一次备份「${r.removed_dir}」（${r.removed_files} 个文件），剩余 ${r.remaining} 次。`,
+      );
+      // 重新生成计划以刷新备份超限提示
+      runPlan(conflictChoice.ov, conflictChoice.mg);
+    } catch (e: unknown) {
+      toast.error(isAppError(e) ? e.message : "清理失败");
+    }
+  };
+
+  /** 在系统资源管理器中打开备份目录。 */
+  const revealBackup = async (p: string) => {
+    try {
+      await apiCall<boolean>(COMMANDS.revealPath, { path: p });
+    } catch {
+      toast.error("打开备份文件夹失败。");
+    }
   };
 
   const manifestCategories = useMemo(() => {
@@ -357,34 +447,37 @@ export function UnpackWizard(props: { onExit: () => void }) {
         <div className="stack">
           {openError && (
             <Banner
-              kind="danger"
-              title={`无法打开迁移包（${openError.code}）`}
+              kind={openError.code === "task_cancelled" ? "warning" : "danger"}
+              title={
+                openError.code === "task_cancelled"
+                  ? "已取消校验"
+                  : `无法打开迁移包（${openError.code}）`
+              }
               onClose={() => setOpenError(null)}
             >
               {openError.message}
             </Banner>
           )}
           <div className="card stack">
-            <div className="field">
-              <label className="field-label" htmlFor="pkg-path">
-                迁移包路径（.zam）
-              </label>
-              <div className="input-group">
-                <input
-                  id="pkg-path"
-                  className="input input-mono"
-                  value={pkgPath}
-                  onChange={(e) => setPkgPath(e.target.value)}
-                  placeholder="例如 D:/迁移包/codex-迁移包-20260817.zam"
-                />
-                <button type="button" className="btn" onClick={browsePackage}>
-                  浏览…
-                </button>
+            <PathPicker
+              kind="file"
+              label="迁移包路径（.zam）"
+              value={pkgPath}
+              placeholder="点击选择要恢复的迁移包文件"
+              onPick={pickPkgFile}
+              hint="打开后会逐文件校验，确认包在拷贝过程中没有损坏。"
+            />
+            {opening && (
+              <div className="stack">
+                <ProgressBar progress={progress} idleText="正在打开迁移包…" />
+                <div className="row">
+                  <button type="button" className="btn" onClick={() => setConfirmCancel(true)}>
+                    取消校验
+                  </button>
+                </div>
               </div>
-              <p className="field-hint">打开后会逐文件校验 SHA-256，确认包在拷贝过程中没有损坏。</p>
-            </div>
-            {opening && <ProgressBar progress={progress} idleText="正在打开迁移包…" />}
-            {!manifest && !opening && (
+            )}
+            {!opening && (
               <div>
                 <button
                   type="button"
@@ -392,8 +485,13 @@ export function UnpackWizard(props: { onExit: () => void }) {
                   disabled={!pkgPath.trim()}
                   onClick={openPackage}
                 >
-                  打开并校验
+                  {manifest ? "重新校验" : "打开并校验"}
                 </button>
+                {manifest && (
+                  <span className="muted" style={{ marginLeft: "var(--space-3)" }}>
+                    已校验通过；换了文件或想再次核对时可重新校验。
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -538,30 +636,14 @@ export function UnpackWizard(props: { onExit: () => void }) {
               两种模式都不会删除目标机器上的任何文件；内容一致的一律跳过。
             </p>
 
-            <div className="field">
-              <label className="field-label" htmlFor="unpack-target-root">
-                恢复目标目录
-              </label>
-              <div className="input-group">
-                <input
-                  id="unpack-target-root"
-                  className="input input-mono"
-                  value={targetRoot}
-                  aria-describedby="unpack-target-root-hint"
-                  onChange={(e) => {
-                    setTargetRoot(e.target.value);
-                    targetDirtyRef.current = true;
-                  }}
-                />
-                <button type="button" className="btn" onClick={browseTarget}>
-                  浏览…
-                </button>
-              </div>
-              <p className="field-hint" id="unpack-target-root-hint">
-                资产会恢复到这里。默认取包内档案（{pkgProfileLabel}
-                ）在本机的资产根目录，确认无误即可，一般无需修改。
-              </p>
-            </div>
+            <PathPicker
+              kind="dir"
+              label="恢复目标目录"
+              value={targetRoot}
+              placeholder="点击选择恢复到哪个文件夹"
+              onPick={pickTargetRoot}
+              hint={`资产会恢复到这里。默认取包内档案（${pkgProfileLabel}）在本机的资产根目录，确认无误即可，一般无需修改。`}
+            />
           </div>
 
           <footer className="wizard-footer">
@@ -579,16 +661,50 @@ export function UnpackWizard(props: { onExit: () => void }) {
       {step === 3 && (
         <div className="stack">
           {plan?.backup_cleanup_hint && (
-            <Banner kind="warning" title="备份目录超出保留上限">
+            <Banner
+              kind="warning"
+              title="备份目录超出保留上限"
+              actions={
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setConfirmCleanup(true)}
+                >
+                  清理最早一次备份
+                </button>
+              }
+            >
               {plan.backup_cleanup_hint}
             </Banner>
           )}
           {planError && (
-            <Banner kind="danger" title="生成变更计划失败" onClose={() => setPlanError(null)}>
-              {planError}
+            <Banner
+              kind={planError.code === "task_cancelled" ? "warning" : "danger"}
+              title={planError.code === "task_cancelled" ? "已取消" : "生成变更计划失败"}
+              onClose={() => setPlanError(null)}
+              actions={
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => runPlan(conflictChoice.ov, conflictChoice.mg)}
+                >
+                  重新生成计划
+                </button>
+              }
+            >
+              {planError.message}
             </Banner>
           )}
-          {planning && <ProgressBar progress={progress} idleText="正在生成变更计划…" />}
+          {planning && (
+            <div className="stack">
+              <ProgressBar progress={progress} idleText="正在生成变更计划…" />
+              <div className="row">
+                <button type="button" className="btn" onClick={() => setConfirmCancel(true)}>
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
 
           {plan && !planning && (
             <div className="card stack">
@@ -705,14 +821,49 @@ export function UnpackWizard(props: { onExit: () => void }) {
       {step === 4 && (
         <div className="stack">
           {applyError && (
-            <Banner kind="danger" title={`执行失败（${applyError.code}）`}>
-              {applyError.message}已写入的文件保持现状，备份目录可用于恢复。
+            <Banner
+              kind={applyError.code === "task_cancelled" ? "warning" : "danger"}
+              title={
+                applyError.code === "task_cancelled"
+                  ? "已取消执行"
+                  : `执行失败（${applyError.code}）`
+              }
+              actions={
+                <>
+                  <button type="button" className="btn btn-sm" onClick={executeCore}>
+                    {applyError.code === "task_cancelled" ? "继续执行" : "重新执行"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setApplyError(null);
+                      setStep(2);
+                    }}
+                  >
+                    返回修改
+                  </button>
+                </>
+              }
+            >
+              {applyError.message}
+              {applyError.code === "task_cancelled"
+                ? " 已写入的文件保持现状，未写入的不再继续。"
+                : " 已写入的文件保持现状，备份目录可用于恢复。"}
             </Banner>
           )}
           {!report && (
             <div className="card stack">
               <h2 className="card-title">正在执行解包</h2>
               <ProgressBar progress={progress} idleText="正在准备执行…" />
+              {executing && (
+                <div className="row">
+                  <button type="button" className="btn" onClick={() => setConfirmCancel(true)}>
+                    取消执行
+                  </button>
+                  <span className="muted">取消后已写入的文件保留在目标目录。</span>
+                </div>
+              )}
             </div>
           )}
           {report && (
@@ -721,7 +872,7 @@ export function UnpackWizard(props: { onExit: () => void }) {
                 <h2 className="card-title" style={{ marginBottom: 0 }}>
                   解包完成
                 </h2>
-                <StatusTag kind="success">复验通过</StatusTag>
+                <StatusTag kind="success">校验通过</StatusTag>
               </div>
               <dl className="kv-grid">
                 <div className="kv-item">
@@ -733,7 +884,7 @@ export function UnpackWizard(props: { onExit: () => void }) {
                   <dd>{report.executed.filter((i) => i.status === "skipped").length} 个</dd>
                 </div>
                 <div className="kv-item">
-                  <dt>复验文件数</dt>
+                  <dt>校验文件数</dt>
                   <dd>{report.verified_files} 个</dd>
                 </div>
                 <div className="kv-item">
@@ -741,6 +892,17 @@ export function UnpackWizard(props: { onExit: () => void }) {
                   <dd className="mono">{report.backup_dir ?? "本次无替换，未产生备份"}</dd>
                 </div>
               </dl>
+              {report.backup_dir && (
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void revealBackup(report.backup_dir!)}
+                  >
+                    打开备份文件夹
+                  </button>
+                </div>
+              )}
               <div className="table-shell">
                 <table className="data-table" aria-label="执行明细">
                   <thead>
@@ -773,24 +935,17 @@ export function UnpackWizard(props: { onExit: () => void }) {
             </div>
           )}
           <footer className="wizard-footer">
-            <button type="button" className="btn" onClick={props.onExit}>
+            <button type="button" className="btn" onClick={props.onExit} disabled={executing}>
               回到首页
             </button>
-            {report && needsAdaptCount > 0 ? (
-              <button type="button" className="btn btn-primary" onClick={goPathfixStep}>
-                下一步：路径适配（{needsAdaptCount} 个文件需要）
+            {executing && (
+              <button type="button" className="btn btn-primary" disabled>
+                正在执行…
               </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={executing}
-                onClick={() => {
-                  // 无适配需求时也落到路径适配步（其内为空状态说明），保持向导出口一致
-                  if (report) goPathfixStep();
-                }}
-              >
-                {report ? "下一步：路径适配" : "等待执行完成…"}
+            )}
+            {!executing && report && (
+              <button type="button" className="btn btn-primary" onClick={goPathfixStep}>
+                下一步：路径适配{needsAdaptCount > 0 ? `（${needsAdaptCount} 个文件需要）` : ""}
               </button>
             )}
           </footer>
@@ -803,10 +958,17 @@ export function UnpackWizard(props: { onExit: () => void }) {
           <div className="card stack">
             <div className="row">
               <h2 className="card-title" style={{ marginBottom: 0 }}>
-                路径适配（旧机绝对路径 → 本机）
+                路径适配（旧机完整路径 → 本机）
               </h2>
               {detecting && <StatusTag kind="info">正在检出…</StatusTag>}
             </div>
+            {detecting && (
+              <div className="row">
+                <button type="button" className="btn" onClick={() => setConfirmCancel(true)}>
+                  取消检测
+                </button>
+              </div>
+            )}
             <p className="secondary">
               文件已写入目标目录，现在检测其中的旧机绝对路径并逐条确认替换；只处理文本类文件，且替换前会先备份。
             </p>
@@ -817,6 +979,20 @@ export function UnpackWizard(props: { onExit: () => void }) {
                 reason="迁移包内没有任何文件被标记为需要路径适配（不含旧机绝对路径的文本资产）。"
                 nextStep="直接回到首页，本次解包已全部完成。"
               />
+            )}
+
+            {needsAdaptCount > 0 && !detect && detectError && !detecting && (
+              <Banner
+                kind="danger"
+                title="路径检出失败"
+                actions={
+                  <button type="button" className="btn btn-sm" onClick={runDetect}>
+                    重新检测
+                  </button>
+                }
+              >
+                {detectError.message}
+              </Banner>
             )}
 
             {needsAdaptCount > 0 && detect && (
@@ -919,14 +1095,28 @@ export function UnpackWizard(props: { onExit: () => void }) {
                   </Banner>
                 )}
 
-                {pathfixing && <ProgressBar progress={progress} idleText="正在执行路径替换…" />}
+                {pathfixing && (
+                  <div className="stack">
+                    <ProgressBar progress={progress} idleText="正在执行路径替换…" />
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => setConfirmCancel(true)}
+                      >
+                        取消替换
+                      </button>
+                      <span className="muted">取消后已替换的文件保持现状。</span>
+                    </div>
+                  </div>
+                )}
 
-                {!pathfixReport && (
+                {!pathfixReport && !pathfixing && (
                   <div className="row">
                     <button
                       type="button"
-                      className="btn"
-                      disabled={enabledMappings.length === 0 || pathfixing}
+                      className="btn btn-primary"
+                      disabled={enabledMappings.length === 0}
                       onClick={() => setConfirmPathfix(true)}
                     >
                       确认并执行路径替换（{enabledMappings.length} 条映射）
@@ -939,10 +1129,27 @@ export function UnpackWizard(props: { onExit: () => void }) {
           </div>
 
           <footer className="wizard-footer">
-            <button type="button" className="btn" onClick={() => setStep(4)}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setStep(4)}
+              disabled={pathfixing}
+            >
               上一步：查看执行报告
             </button>
-            <button type="button" className="btn btn-primary" onClick={props.onExit}>
+            <button
+              type="button"
+              className="btn"
+              disabled={pathfixing}
+              onClick={() => {
+                // 未执行替换（且有可执行映射）时先确认，防误点结束漏掉关键一步
+                if (!pathfixReport && enabledMappings.length > 0) {
+                  setConfirmFinish(true);
+                  return;
+                }
+                props.onExit();
+              }}
+            >
               完成，回到首页
             </button>
           </footer>
@@ -1007,6 +1214,61 @@ export function UnpackWizard(props: { onExit: () => void }) {
         confirmText="确认执行"
         onConfirm={executeApply}
         onCancel={() => setConfirmApply(false)}
+      />
+
+      {/* 取消当前长任务确认（校验/计划/执行/检出/替换共用） */}
+      <ConfirmDialog
+        open={confirmCancel}
+        title="取消当前操作？"
+        points={[
+          { label: "影响", text: "放弃当前进行中的操作；解包已写入的文件会保留在目标目录。" },
+          { label: "之后", text: "可从失败提示里的按钮重试或返回修改。" },
+        ]}
+        confirmText="取消操作"
+        onConfirm={() => void doCancel()}
+        onCancel={() => setConfirmCancel(false)}
+      />
+
+      {/* 清理最早一次备份确认（删除不可恢复，只删时间戳目录） */}
+      <ConfirmDialog
+        open={confirmCleanup}
+        title="清理最早一次备份？"
+        danger
+        points={[
+          {
+            label: "对象",
+            text: `恢复目录下备份文件夹中时间最早的一次备份（仅删除形如「年月日-时分秒」的备份目录）`,
+          },
+          { label: "影响", text: "该备份目录及其全部文件将被永久删除，删除后不可恢复。" },
+          { label: "建议", text: "确认不再需要从该次备份还原后再清理。" },
+        ]}
+        confirmText="删除该备份"
+        onConfirm={() => void doCleanup()}
+        onCancel={() => setConfirmCleanup(false)}
+      />
+
+      {/* 未执行路径替换就结束的拦截确认 */}
+      <ConfirmDialog
+        open={confirmFinish}
+        title="还没执行路径替换，确定结束？"
+        danger
+        points={[
+          {
+            label: "现状",
+            text: `已检出 ${enabledMappings.length} 条可替换的旧机路径映射，尚未执行替换。`,
+          },
+          {
+            label: "后果",
+            text: "目标文件里保留旧电脑的路径，相关配置在新电脑上可能无法直接使用。",
+          },
+          { label: "建议", text: "点取消回到页面，先执行路径替换再结束。" },
+        ]}
+        confirmText="仍然结束"
+        onConfirm={() => {
+          setConfirmFinish(false);
+          props.onExit();
+        }}
+        onCancel={() => setConfirmFinish(false)}
       />
     </section>
   );

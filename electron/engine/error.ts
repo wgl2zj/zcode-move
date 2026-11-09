@@ -9,6 +9,8 @@ export type AppErrorCode =
   | "plan_not_confirmed"
   | "path_setup"
   | "encoding_unsupported"
+  | "task_busy"
+  | "task_cancelled"
   | "internal";
 
 const CODE_MESSAGES: Record<AppErrorCode, string> = {
@@ -19,6 +21,8 @@ const CODE_MESSAGES: Record<AppErrorCode, string> = {
   plan_not_confirmed: "变更计划未确认或已失效",
   path_setup: "路径设置不合法",
   encoding_unsupported: "文本编码不受支持（需 UTF-8 无 BOM）",
+  task_busy: "已有任务在进行",
+  task_cancelled: "任务已取消",
   internal: "内部错误",
 };
 

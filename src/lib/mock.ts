@@ -750,6 +750,20 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       return delay(undefined as T);
     }
 
+    // 0.3.0 新增命令的演示路由（真实实现都在主进程，演示模式返回无害的成功值）
+    case COMMANDS.cancelTask:
+      // 演示节奏毫秒级，取消仅象征性接受
+      return delay(true as T);
+    case COMMANDS.pathExists:
+      // 演示流程不触发覆盖确认
+      return delay(false as T);
+    case COMMANDS.revealPath:
+      return delay(true as T);
+    case COMMANDS.copyText:
+      return delay(true as T);
+    case COMMANDS.cleanupEarliestBackup:
+      return delay({ removed_dir: "20260803-112012", removed_files: 3, remaining: 4 } as T);
+
     default:
       return Promise.reject({ code: "internal", message: `未知命令：${cmd}` });
   }

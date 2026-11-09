@@ -6,6 +6,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { BACKUP_DIR, localStamp, safeJoin } from "./applier";
+import { throwIfCancelled, type EngineOpts } from "./opts";
 import type { Manifest } from "./packer";
 
 /** UTF-8 BOM 字节头。 */
@@ -102,12 +103,13 @@ function countOccurrences(text: string, needle: string): number {
 
 /** 检出：在目标根下扫描清单中 needs_path_adapt 且 kind=text 的文件，
  *  统计各映射种子的命中次数（纯只读）。 */
-export async function detect(targetRoot: string, manifest: Manifest): Promise<DetectResult> {
+export async function detect(targetRoot: string, manifest: Manifest, opts?: EngineOpts): Promise<DetectResult> {
   const seedsSrc = defaultSeeds(manifest.source.username);
   const seeds: PathSeed[] = seedsSrc.map(([o, n]) => ({ old: o, new: n, total_hits: 0 }));
   const files: DetectFile[] = [];
 
   for (const mf of manifest.files) {
+    throwIfCancelled(opts);
     if (!mf.needs_path_adapt || mf.kind !== "text") {
       continue;
     }
@@ -141,6 +143,7 @@ export async function applyMappings(
   manifest: Manifest,
   mappings: [string, string][],
   backup: boolean,
+  opts?: EngineOpts,
 ): Promise<PathFixReport> {
   const replaced: ReplacedFile[] = [];
   const skipped: SkippedFile[] = [];
@@ -148,6 +151,7 @@ export async function applyMappings(
   const stamp = localStamp();
 
   for (const mf of manifest.files) {
+    throwIfCancelled(opts);
     if (!mf.needs_path_adapt || mf.kind !== "text") {
       continue;
     }

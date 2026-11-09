@@ -8,6 +8,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { AppError } from "./error";
+import { throwIfCancelled, type EngineOpts } from "./opts";
 import type { AssetCategory, PathRule, Profile } from "./profile/types";
 
 /** 文件种类（决定解包与压缩处理方式；序列化契约：小写字面量）。 */
@@ -124,6 +125,7 @@ async function walkPhysical(
   relPrefix: string | null,
   ancestors: string[],
   out: Collected[],
+  opts?: EngineOpts,
 ): Promise<void> {
   let entries;
   try {
@@ -132,6 +134,7 @@ async function walkPhysical(
     throw new AppError("io", `遍历失败：${e instanceof Error ? e.message : String(e)}`);
   }
   for (const ent of entries) {
+    throwIfCancelled(opts);
     const full = path.join(dir, ent.name);
     const rel = relPrefix === null ? full : path.join(relPrefix, ent.name);
     if (ent.isSymbolicLink()) {
@@ -140,17 +143,21 @@ async function walkPhysical(
         continue; // 链接环：链上已展开过同一物理目标
       }
       ancestors.push(physical);
-      const md = await fsp.stat(physical).catch((e) => {
+      // 断链（目标已被删除，如旧机插件缓存留下的失效 junction）：跳过不中断整个扫描
+      const md = await fsp.stat(physical).catch((e: NodeJS.ErrnoException) => {
+        if (e.code === "ENOENT") return null;
         throw ioErr(e);
       });
-      if (md.isDirectory()) {
-        await walkPhysical(physical, rel, ancestors, out);
-      } else if (md.isFile()) {
-        out.push({ abs: physical, rel });
+      if (md !== null) {
+        if (md.isDirectory()) {
+          await walkPhysical(physical, rel, ancestors, out, opts);
+        } else if (md.isFile()) {
+          out.push({ abs: physical, rel });
+        }
       }
       ancestors.pop();
     } else if (ent.isDirectory()) {
-      await walkPhysical(full, rel, ancestors, out);
+      await walkPhysical(full, rel, ancestors, out, opts);
     } else if (ent.isFile()) {
       out.push({ abs: full, rel });
     }
@@ -171,7 +178,7 @@ function relString(relPath: string, root: string): string {
  *  迁移语义：链接按目标真实内容入包，新机得到自包含副本；全程物理路径访问。
  *  `withHash=false` 用于 Excluded 类别（只统计，不读内容）。规则路径不存在是
  *  合法状态（Missing 类别），返回空。 */
-async function collectFiles(abs: string, root: string, withHash: boolean): Promise<ScannedFile[]> {
+async function collectFiles(abs: string, root: string, withHash: boolean, opts?: EngineOpts): Promise<ScannedFile[]> {
   const collected: Collected[] = [];
   const st = await fsp.lstat(abs).catch((e: NodeJS.ErrnoException) => {
     if (e.code === "ENOENT") return null;
@@ -180,24 +187,27 @@ async function collectFiles(abs: string, root: string, withHash: boolean): Promi
   if (st === null) return [];
   if (st.isSymbolicLink()) {
     const physical = await resolveLinkPhysically(abs);
-    const md = await fsp.stat(physical).catch((e) => {
+    const md = await fsp.stat(physical).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "ENOENT") return null; // 断链（目标已删）视为不存在
       throw ioErr(e);
     });
+    if (md === null) return [];
     if (md.isFile()) {
       collected.push({ abs: physical, rel: abs });
     } else if (md.isDirectory()) {
       const ancestors = [physical];
-      await walkPhysical(physical, abs, ancestors, collected);
+      await walkPhysical(physical, abs, ancestors, collected, opts);
     }
   } else if (st.isFile()) {
     collected.push({ abs, rel: abs });
   } else if (st.isDirectory()) {
-    await walkPhysical(abs, null, [], collected);
+    await walkPhysical(abs, null, [], collected, opts);
   }
   // 排序保证清单稳定（同目录内容不变时两次扫描结果一致）
   collected.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
   const out: ScannedFile[] = [];
   for (const c of collected) {
+    throwIfCancelled(opts);
     const rel = relString(c.rel, root);
     const size = (await fsp.stat(c.abs).catch((e) => {
       throw ioErr(e);
@@ -215,6 +225,7 @@ async function scanCategory(
   root: string,
   cat: AssetCategory,
   withHash: boolean,
+  opts?: EngineOpts,
 ): Promise<CategoryReport> {
   const targets = expandRule(root, cat.rule);
   const report = (status: CategoryStatus, files: ScannedFile[], total: number): CategoryReport => ({
@@ -229,8 +240,9 @@ async function scanCategory(
     const files: ScannedFile[] = [];
     let total = 0;
     for (const t of targets) {
+      throwIfCancelled(opts);
       if (!fs.existsSync(t)) continue;
-      for (const f of await collectFiles(t, root, false)) {
+      for (const f of await collectFiles(t, root, false, opts)) {
         total += f.size;
         files.push(f);
       }
@@ -243,6 +255,7 @@ async function scanCategory(
     let blocked: string | null = null;
     let total = 0;
     for (const t of targets) {
+      throwIfCancelled(opts);
       if (!fs.existsSync(t)) continue;
       // WAL/SHM 检测：存在说明源程序可能未完全退出，库可能不一致
       const base = path.basename(t);
@@ -252,7 +265,7 @@ async function scanCategory(
       if (sidecars.length > 0) {
         blocked = `检测到 ${sidecars.join(" 与 ")}，源程序可能未完全退出；请退出后重新检测，或跳过该类别`;
       }
-      for (const f of await collectFiles(t, root, withHash)) {
+      for (const f of await collectFiles(t, root, withHash, opts)) {
         total += f.size;
         files.push(f);
       }
@@ -268,7 +281,8 @@ async function scanCategory(
   const files: ScannedFile[] = [];
   let total = 0;
   for (const t of targets) {
-    for (const f of await collectFiles(t, root, withHash)) {
+    throwIfCancelled(opts);
+    for (const f of await collectFiles(t, root, withHash, opts)) {
       total += f.size;
       files.push(f);
     }
@@ -286,11 +300,12 @@ async function assertRootIsDir(root: string): Promise<void> {
 }
 
 /** 按档案扫描根目录，产出完整盘点报告（UI 盘点页数据源：全部类别、含哈希）。 */
-export async function scan(profile: Profile, root: string): Promise<ScanReport> {
+export async function scan(profile: Profile, root: string, opts?: EngineOpts): Promise<ScanReport> {
   await assertRootIsDir(root);
   const categories: CategoryReport[] = [];
   for (const cat of profile.categories) {
-    categories.push(await scanCategory(root, cat, true));
+    throwIfCancelled(opts);
+    categories.push(await scanCategory(root, cat, true, opts));
   }
   return { profile_id: profile.id, profile_version: profile.version, root, categories };
 }
@@ -302,13 +317,15 @@ export async function scanSelected(
   profile: Profile,
   root: string,
   categoryIds: string[],
+  opts?: EngineOpts,
 ): Promise<ScanReport> {
   await assertRootIsDir(root);
   const categories: CategoryReport[] = [];
   for (const id of categoryIds) {
+    throwIfCancelled(opts);
     const cat = profile.categories.find((c) => c.id === id);
     if (!cat) throw new AppError("invalid_package", `未知类别：${id}`);
-    categories.push(await scanCategory(root, cat, false));
+    categories.push(await scanCategory(root, cat, false, opts));
   }
   return { profile_id: profile.id, profile_version: profile.version, root, categories };
 }

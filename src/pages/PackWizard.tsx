@@ -11,14 +11,16 @@ import {
   type ProgressPayload,
   type ScanReport,
 } from "../lib/ipc";
-import { apiCall, pickDirectory, useProgress } from "../lib/mock";
+import { apiCall, useProgress } from "../lib/mock";
 import { formatBytes } from "../lib/format";
 import { Banner } from "../components/Banner";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { WizardSteps } from "../components/WizardSteps";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatusTag, SkipTag } from "../components/StatusTag";
 import { useToast } from "../components/Toast";
 import { IconWarning } from "../components/icons";
+import { PathPicker } from "../components/PathPicker";
 import { addHistory } from "../components/history";
 import { joinPath } from "../components/paths";
 import {
@@ -31,21 +33,26 @@ import {
 
 const STEPS = ["选择档案", "盘点结果", "档位与输出", "执行打包"];
 
-/** 建议文件名按档案动态生成：`<档案id>-迁移包-<日期>.zam`（在产档案仅 zcode；
- *  旧 codex/claude 包的 `<id>-迁移包-<日期>.zam` 命名由解包向导按包内档案识别，与此处无关）。 */
+/** 建议文件名按档案动态生成：`<档案id>-迁移包-<日期时分秒>.zam`（精确到秒，
+ *  同一天重打不再默认撞名；旧 codex/claude 包的命名由解包向导按包内档案识别，与此处无关）。 */
 function suggestedFileName(profileId: string): string {
   const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
-  return `${profileId}-迁移包-${ymd}.zam`;
+  const p = (n: number): string => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(
+    d.getMinutes(),
+  )}${p(d.getSeconds())}`;
+  return `${profileId}-迁移包-${stamp}.zam`;
 }
 
 function isAppError(e: unknown): e is AppErrorPayload {
   return typeof e === "object" && e !== null && "code" in e && "message" in e;
 }
 
-export function PackWizard(props: { onExit: () => void }) {
+export function PackWizard(props: {
+  onExit: () => void;
+  /** 长任务执行中上报给 App 锁导航（可选：测试不传不受影响）。 */
+  onBusyChange?: (busy: boolean) => void;
+}) {
   const toast = useToast();
   const [step, setStep] = useState(0);
 
@@ -61,12 +68,13 @@ export function PackWizard(props: { onExit: () => void }) {
   const [scanError, setScanError] = useState<string | null>(null);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
-  // 第 3 步：档位与输出
+  // 第 3 步：档位与输出（目录用选择卡片，文件名单独填写）
   const [preset, setPreset] = useState<PresetKind>("recommended");
   const [customSel, setCustomSel] = useState<Set<string>>(new Set());
-  const [outputPath, setOutputPath] = useState("");
-  /** 输出路径被手动编辑过后不再跟随档案切换重生成（浏览改目录不算手动编辑文件名）。 */
-  const [outputDirty, setOutputDirty] = useState(false);
+  const [outDir, setOutDir] = useState("");
+  const [outName, setOutName] = useState("");
+  /** 文件名被手动编辑过后不再跟随档案切换重生成（换目录不影响）。 */
+  const [outNameDirty, setOutNameDirty] = useState(false);
   const [outputError, setOutputError] = useState<string | null>(null);
 
   // 第 4 步：执行
@@ -75,6 +83,18 @@ export function PackWizard(props: { onExit: () => void }) {
   const [result, setResult] = useState<PackResult | null>(null);
   const [packError, setPackError] = useState<AppErrorPayload | null>(null);
   const startedRef = useRef(false);
+  /** 覆盖确认：输出目标已存在同名文件时挂起待确认的完整路径。 */
+  const [pendingOverwrite, setPendingOverwrite] = useState<string | null>(null);
+  /** 取消确认框。 */
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  /** 执行中上报 App 锁导航；卸载时复位。 */
+  const busy = scanning || packing;
+  const onBusyChange = props.onBusyChange;
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
 
   useProgress((p) => {
     if (p.task === "pack") setProgress(p);
@@ -105,17 +125,12 @@ export function PackWizard(props: { onExit: () => void }) {
     apiCall<{ default_output_dir: string }>(COMMANDS.loadSettings)
       .then((s) => {
         if (disposed) return;
-        // 默认目录为空时只预填文件名，避免拼到盘根；非空用正斜杠拼接
-        setOutputPath(
-          joinPath(
-            s.default_output_dir,
-            suggestedFileName(profileRef.current?.id ?? "zcode"),
-          ),
-        );
+        // 默认目录为空时只预填文件名前段由用户选择目录；非空直接预填目录
+        setOutDir(s.default_output_dir);
+        setOutName(suggestedFileName(profileRef.current?.id ?? "zcode"));
       })
       .catch(() => {
-        if (!disposed)
-          setOutputPath(suggestedFileName(profileRef.current?.id ?? "zcode"));
+        if (!disposed) setOutName(suggestedFileName(profileRef.current?.id ?? "zcode"));
       });
     return () => {
       disposed = true;
@@ -126,7 +141,7 @@ export function PackWizard(props: { onExit: () => void }) {
   const categoryTable = useMemo(() => profile?.categories ?? [], [profile]);
 
   /** 切换档案：类别表/默认根/盘点结果/自定义勾选全部跟随刷新；
-   *  输出文件名未被手动编辑过时，保留目录部分、按新档案重生成建议名。 */
+   *  输出文件名未被手动编辑过时，按新档案重生成建议名（目录保持）。 */
   const switchProfile = (id: string) => {
     const next = profiles?.find((p) => p.id === id);
     if (!next || next.id === profile?.id) return;
@@ -136,11 +151,8 @@ export function PackWizard(props: { onExit: () => void }) {
     setScanError(null);
     setSkipped(new Set());
     setCustomSel(new Set());
-    if (!outputDirty) {
-      setOutputPath((prev) => {
-        const dir = prev.includes("/") ? prev.slice(0, prev.lastIndexOf("/")) : "";
-        return joinPath(dir, suggestedFileName(next.id));
-      });
+    if (!outNameDirty) {
+      setOutName(suggestedFileName(next.id));
     }
   };
 
@@ -245,27 +257,38 @@ export function PackWizard(props: { onExit: () => void }) {
     return list;
   }, [scan, skipped, presetWantedIds, categoryTable]);
 
-  /** 弹系统目录选择框选输出目录；选中后拼回建议文件名（取消不改动）。 */
-  const browseOutput = async () => {
-    const dir = await pickDirectory(outputPath);
-    if (dir) {
-      setOutputPath(joinPath(dir, suggestedFileName(profile?.id ?? "zcode")));
-      setOutputError(null);
-      // 只改了目录、文件名仍是建议名 → 继续跟随档案切换
-      setOutputDirty(false);
-    }
-  };
-
-  const startPack = () => {
+  /** 开始打包：先做输出查重（同名文件已存在 → 危险确认），确认后才写盘。
+   *  建议：目标文件已存在时必须经用户确认才覆盖（2026-11-09 审查 H3）。 */
+  const startPack = async () => {
     if (!profile || !scan) return;
-    if (!outputPath.trim()) {
-      setOutputError("输出路径不能为空");
+    if (!outDir.trim()) {
+      setOutputError("请先选择迁移包要保存到哪个文件夹");
+      return;
+    }
+    if (!outName.trim()) {
+      setOutputError("请填写迁移包文件名");
       return;
     }
     if (selectedCategories.length === 0) {
       toast.warning("当前档位没有选中任何可迁移类别，请调整档位或勾选类别。");
       return;
     }
+    const target = joinPath(outDir.trim(), outName.trim());
+    try {
+      const exists = await apiCall<boolean>(COMMANDS.pathExists, { path: target });
+      if (exists) {
+        setPendingOverwrite(target);
+        return;
+      }
+    } catch {
+      // 查重失败不阻断打包（后端兜底仍是直接写，与旧行为一致）
+    }
+    doStartPack(target);
+  };
+
+  const doStartPack = (target: string) => {
+    setPendingOverwrite(null);
+    if (!profile) return;
     setStep(3);
     if (startedRef.current) return;
     startedRef.current = true;
@@ -276,7 +299,7 @@ export function PackWizard(props: { onExit: () => void }) {
       root,
       categories: selectedCategories,
       presetKind: preset,
-      outputPath,
+      outputPath: target,
       warnings,
     })
       .then((r) => {
@@ -294,6 +317,34 @@ export function PackWizard(props: { onExit: () => void }) {
       .finally(() => setPacking(false));
   };
 
+  /** 请求取消当前打包（后端在循环检查点抛 task_cancelled，半成品包自动删除）。 */
+  const doCancel = async () => {
+    setConfirmCancel(false);
+    try {
+      await apiCall<boolean>(COMMANDS.cancelTask);
+    } catch {
+      // 取消请求失败不打扰（任务可能刚好已结束）
+    }
+  };
+
+  /** 在系统资源管理器中定位文件。 */
+  const revealOutput = async (p: string) => {
+    try {
+      await apiCall<boolean>(COMMANDS.revealPath, { path: p });
+    } catch {
+      toast.error("打开所在文件夹失败。");
+    }
+  };
+
+  const copyOutputPath = async (p: string) => {
+    try {
+      await apiCall<boolean>(COMMANDS.copyText, { text: p });
+      toast.success("迁移包路径已复制。");
+    } catch {
+      toast.error("复制路径失败。");
+    }
+  };
+
   const resetWizard = () => {
     setStep(0);
     setScan(null);
@@ -302,6 +353,9 @@ export function PackWizard(props: { onExit: () => void }) {
     setProgress(null);
     setPackError(null);
     startedRef.current = false;
+    // 新一轮建议名带新时分秒，并恢复"未手动编辑"跟随状态
+    setOutNameDirty(false);
+    setOutName(suggestedFileName(profile?.id ?? "zcode"));
   };
 
   return (
@@ -366,18 +420,13 @@ export function PackWizard(props: { onExit: () => void }) {
             ) : (
               !profilesError && <p className="secondary">正在加载资产档案…</p>
             )}
-            <div className="field">
-              <label className="field-label" htmlFor="pack-root">
-                资产根目录
-              </label>
-              <input
-                id="pack-root"
-                className="input input-mono"
-                value={root}
-                onChange={(e) => setRoot(e.target.value)}
-              />
-              <p className="field-hint">默认取档案登记的根目录，一般无需修改。</p>
-            </div>
+            <PathPicker
+              kind="dir"
+              label="资产根目录"
+              value={root}
+              onPick={setRoot}
+              hint="默认取档案登记的根目录，一般无需修改；需要更换时点击重新选择。"
+            />
           </div>
           <footer className="wizard-footer">
             <button type="button" className="btn" onClick={props.onExit}>
@@ -619,32 +668,46 @@ export function PackWizard(props: { onExit: () => void }) {
             </p>
 
             <div className="field">
-              <label className="field-label" htmlFor="pack-output">
-                迁移包输出路径
+              <label className="field-label" htmlFor="pack-outdir">
+                迁移包保存到哪个文件夹
               </label>
-              <div className="input-group">
-                <input
-                  id="pack-output"
-                  className="input input-mono"
-                  value={outputPath}
-                  aria-invalid={outputError ? true : undefined}
-                  aria-describedby={outputError ? "pack-output-error" : undefined}
-                  onChange={(e) => {
-                    setOutputPath(e.target.value);
-                    setOutputDirty(true);
-                    if (e.target.value.trim()) setOutputError(null);
-                  }}
-                />
-                <button type="button" className="btn" onClick={browseOutput}>
-                  浏览…
-                </button>
-              </div>
+              <PathPicker
+                kind="dir"
+                label="迁移包保存到哪个文件夹"
+                value={outDir}
+                placeholder="点击选择文件夹（默认取设置页的「默认输出目录」）"
+                onPick={(d) => {
+                  setOutDir(d);
+                  setOutputError(null);
+                }}
+              />
+              <p className="field-hint" id="pack-outdir-hint">
+                默认取设置页的「默认输出目录」，可改到 U 盘或同步盘。
+              </p>
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="pack-outname">
+                迁移包文件名
+              </label>
+              <input
+                id="pack-outname"
+                className="input input-mono"
+                value={outName}
+                aria-invalid={outputError ? true : undefined}
+                aria-describedby={outputError ? "pack-output-error" : undefined}
+                onChange={(e) => {
+                  setOutName(e.target.value);
+                  setOutNameDirty(true);
+                  if (e.target.value.trim()) setOutputError(null);
+                }}
+              />
               {outputError && (
                 <p className="field-error" id="pack-output-error" role="alert">
                   <IconWarning size={14} /> {outputError}
                 </p>
               )}
-              <p className="field-hint">默认取设置页的「默认输出目录」，可改到 U 盘或同步盘。</p>
+              <p className="field-hint">默认带日期时分秒的建议名，可改成好认的名字（保持 .zam 结尾）。</p>
             </div>
           </div>
 
@@ -663,8 +726,12 @@ export function PackWizard(props: { onExit: () => void }) {
         <div className="stack">
           {packError && (
             <Banner
-              kind="danger"
-              title={`打包失败（${packError.code}）`}
+              kind={packError.code === "task_cancelled" ? "warning" : "danger"}
+              title={
+                packError.code === "task_cancelled"
+                  ? "已取消打包"
+                  : `打包失败（${packError.code}）`
+              }
               onClose={() => setPackError(null)}
               actions={
                 <button
@@ -679,13 +746,23 @@ export function PackWizard(props: { onExit: () => void }) {
                 </button>
               }
             >
-              {packError.message}
+              {packError.code === "task_cancelled"
+                ? "本次打包已取消，未生成迁移包（半成品已自动清理）。"
+                : packError.message}
             </Banner>
           )}
           {!result && (
             <div className="card stack">
               <h2 className="card-title">正在打包</h2>
               <ProgressBar progress={progress} idleText="正在准备打包任务…" />
+              {packing && (
+                <div className="row">
+                  <button type="button" className="btn" onClick={() => setConfirmCancel(true)}>
+                    取消打包
+                  </button>
+                  <span className="muted">取消后本次进度作废，半成品包会自动删除。</span>
+                </div>
+              )}
             </div>
           )}
           {result && (
@@ -714,6 +791,22 @@ export function PackWizard(props: { onExit: () => void }) {
                   <dd className="mono">{result.output_path}</dd>
                 </div>
               </dl>
+              <div className="row">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void revealOutput(result.output_path)}
+                >
+                  打开所在文件夹
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void copyOutputPath(result.output_path)}
+                >
+                  复制路径
+                </button>
+              </div>
               {result.manifest.warnings.length > 0 && (
                 <div>
                   <h3 className="card-sub" style={{ marginBottom: "var(--space-2)" }}>
@@ -729,7 +822,7 @@ export function PackWizard(props: { onExit: () => void }) {
             </div>
           )}
           <footer className="wizard-footer">
-            <button type="button" className="btn" onClick={props.onExit}>
+            <button type="button" className="btn" onClick={props.onExit} disabled={packing}>
               回到首页
             </button>
             <button
@@ -743,6 +836,39 @@ export function PackWizard(props: { onExit: () => void }) {
           </footer>
         </div>
       )}
+
+      {/* 覆盖确认：输出目标已存在同名迁移包（2026-11-09 审查 H3） */}
+      <ConfirmDialog
+        open={pendingOverwrite !== null}
+        title="覆盖已存在的迁移包？"
+        danger
+        points={[
+          { label: "对象", text: pendingOverwrite ?? "" },
+          {
+            label: "影响",
+            text: "目标位置已有同名文件，继续打包将用新包覆盖它，旧包内容不可恢复。",
+          },
+          { label: "建议", text: "如需保留旧包，请点取消并修改文件名或另选文件夹。" },
+        ]}
+        confirmText="覆盖并继续"
+        onConfirm={() => {
+          if (pendingOverwrite) doStartPack(pendingOverwrite);
+        }}
+        onCancel={() => setPendingOverwrite(null)}
+      />
+
+      {/* 取消打包确认 */}
+      <ConfirmDialog
+        open={confirmCancel}
+        title="取消本次打包？"
+        points={[
+          { label: "影响", text: "放弃当前打包进度；已写入的部分包文件会被自动删除，不留半成品。" },
+          { label: "之后", text: "可返回第 3 步修改后重新打包。" },
+        ]}
+        confirmText="取消打包"
+        onConfirm={() => void doCancel()}
+        onCancel={() => setConfirmCancel(false)}
+      />
     </section>
   );
 }

@@ -6,11 +6,12 @@ import {
   type ProfileSummary,
   type Settings,
 } from "../lib/ipc";
-import { apiCall, pickDirectory } from "../lib/mock";
+import { apiCall } from "../lib/mock";
 import { Banner } from "../components/Banner";
 import { StatusTag } from "../components/StatusTag";
 import { useToast } from "../components/Toast";
 import { IconWarning } from "../components/icons";
+import { PathPicker } from "../components/PathPicker";
 
 function isAppError(e: unknown): e is AppErrorPayload {
   return typeof e === "object" && e !== null && "code" in e && "message" in e;
@@ -24,7 +25,20 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [dirError, setDirError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
   const [version, setVersion] = useState("");
+
+  /** 档案清单加载（挂载与"重试"共用）；失败显示错误与重试入口，不再静默。 */
+  const loadProfiles = () => {
+    apiCall<ProfileSummary[]>(COMMANDS.listProfiles)
+      .then((list) => {
+        setProfiles(list);
+        setProfilesError(null);
+      })
+      .catch((e: unknown) => {
+        setProfilesError(isAppError(e) ? e.message : "档案清单加载失败");
+      });
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -37,11 +51,7 @@ export function SettingsPage() {
       .catch((e: unknown) => {
         if (!disposed) setLoadError(isAppError(e) ? e.message : "设置加载失败");
       });
-    apiCall<ProfileSummary[]>(COMMANDS.listProfiles)
-      .then((list) => {
-        if (!disposed) setProfiles(list);
-      })
-      .catch(() => undefined);
+    loadProfiles();
     apiCall<{ version: string }>(COMMANDS.appInfo)
       .then((i) => {
         if (!disposed) setVersion(i.version);
@@ -70,13 +80,10 @@ export function SettingsPage() {
       .finally(() => setSaving(false));
   };
 
-  /** 弹系统目录选择框；取消不改动当前值。 */
-  const browse = async () => {
-    const dir = await pickDirectory(outputDir);
-    if (dir) {
-      setOutputDir(dir);
-      setDirError(null);
-    }
+  /** 选择目录回调（PathPicker）；取消不改动当前值。 */
+  const pickDir = (dir: string) => {
+    setOutputDir(dir);
+    setDirError(null);
   };
 
   const dirty = settings !== null && outputDir.trim() !== settings.default_output_dir;
@@ -97,31 +104,19 @@ export function SettingsPage() {
       <div className="card stack">
         <h2 className="card-title">默认输出目录</h2>
         <div className="field">
-          <label className="field-label" htmlFor="default-output-dir">
-            迁移包默认保存到
-          </label>
-          <div className="input-group">
-            <input
-              id="default-output-dir"
-              className="input input-mono"
-              value={outputDir}
-              aria-invalid={dirError ? true : undefined}
-              aria-describedby={dirError ? "default-output-dir-error" : undefined}
-              onChange={(e) => {
-                setOutputDir(e.target.value);
-                if (e.target.value.trim()) setDirError(null);
-              }}
-            />
-            <button type="button" className="btn" onClick={browse}>
-              浏览…
-            </button>
-          </div>
+          <PathPicker
+            kind="dir"
+            label="迁移包默认保存到"
+            value={outputDir}
+            placeholder="点击选择文件夹"
+            onPick={pickDir}
+            hint="打包向导的「保存到哪个文件夹」会用这个目录预填，仍可逐次修改。"
+          />
           {dirError && (
             <p className="field-error" id="default-output-dir-error" role="alert">
               <IconWarning size={14} /> {dirError}
             </p>
           )}
-          <p className="field-hint">打包向导的「输出路径」会用这个目录预填，仍可逐次修改。</p>
         </div>
         <div className="row">
           <button
@@ -151,7 +146,7 @@ export function SettingsPage() {
       <div className="card stack">
         <h2 className="card-title">资产档案（只读）</h2>
         <p className="secondary">
-          v1 仅内置实测过的 ZCode 档案；新软件需要实测确认路径与策略后才会入档。
+          仅内置实测过的 ZCode 档案（档案格式 v2）；新软件需要实测确认路径与策略后才会入档。
         </p>
         <div className="table-shell">
           <table className="data-table">
@@ -176,7 +171,17 @@ export function SettingsPage() {
                   </td>
                 </tr>
               ))}
-              {profiles.length === 0 && (
+              {profilesError && (
+                <tr>
+                  <td colSpan={5} className="secondary">
+                    档案清单加载失败：{profilesError}{" "}
+                    <button type="button" className="btn btn-sm" onClick={loadProfiles}>
+                      重试
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {profiles.length === 0 && !profilesError && (
                 <tr>
                   <td colSpan={5} className="secondary">
                     正在加载档案…

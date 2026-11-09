@@ -130,22 +130,38 @@ describe("解包向导：dry-run 计划确认（第 4 步）", () => {
     expect(screen.getByText(/合并 1 ·/)).toBeInTheDocument();
   });
 
-  it("第 1 步「浏览…」选择迁移包后回填路径，取消不改动", async () => {
+  it("第 1 步选择卡片选包后回填且校验状态作废，取消选择不改动（H4 锁）", async () => {
     // 宏任务模拟选文件耗时（微任务 setState 在 jsdom+React19 下不可见）
     vi.mocked(pickPackage).mockImplementation(async () => {
       await new Promise((r) => setTimeout(r, 0));
       return "E:\\U盘\\新包.zam";
     });
     renderWizard();
-    const input = await screen.findByLabelText("迁移包路径（.zam）");
-    fireEvent.click(screen.getByRole("button", { name: "浏览…" }));
-    await waitFor(() => expect(input).toHaveValue("E:\\U盘\\新包.zam"));
+    // 先校验通过
+    const openBtn = await screen.findByRole("button", { name: "打开并校验" });
+    await waitFor(() => expect(openBtn).toBeEnabled());
+    fireEvent.click(openBtn);
+    await screen.findByText("包校验通过");
 
-    // 取消（返回 null）不改动当前值
+    // 选择新包：路径回填 + 已校验状态作废（不再残留误导性的"校验通过"卡）
+    fireEvent.click(screen.getByRole("button", { name: "迁移包路径（.zam）" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "迁移包路径（.zam）" })).toHaveTextContent(
+        "E:\\U盘\\新包.zam",
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("包校验通过")).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("button", { name: "打开并校验" })).toBeEnabled();
+
+    // 取消选择（返回 null）不改动当前值
     vi.mocked(pickPackage).mockImplementation(async () => null);
-    fireEvent.click(screen.getByRole("button", { name: "浏览…" }));
+    fireEvent.click(screen.getByRole("button", { name: "迁移包路径（.zam）" }));
     await waitFor(() => expect(pickPackage).toHaveBeenCalledTimes(2));
-    expect(input).toHaveValue("E:\\U盘\\新包.zam");
+    expect(screen.getByRole("button", { name: "迁移包路径（.zam）" })).toHaveTextContent(
+      "E:\\U盘\\新包.zam",
+    );
   });
 
   it("第 3 步展示恢复目标目录（默认档案根目录），plan_apply 携带 targetRoot", async () => {
@@ -157,8 +173,8 @@ describe("解包向导：dry-run 计划确认（第 4 步）", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步：预览内容" }));
     await screen.findByRole("table");
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择恢复模式" }));
-    // 目标目录默认为档案登记的 ZCode 根目录
-    expect(await screen.findByLabelText("恢复目标目录")).toHaveValue(
+    // 目标目录默认为档案登记的 ZCode 根目录（选择卡片显示当前值）
+    expect(await screen.findByRole("button", { name: "恢复目标目录" })).toHaveTextContent(
       "C:\\Users\\demo\\.zcode",
     );
     fireEvent.click(screen.getByRole("button", { name: "下一步：生成变更计划" }));
@@ -176,8 +192,14 @@ describe("解包向导：dry-run 计划确认（第 4 步）", () => {
     // 产品收窄（spec 决策 1）后 codex 无打包入口，但旧版打出的迁移包不作废：
     // 解包向导按包内档案解析类别中文名/token 警告，目标根推导为 ~/.codex。
     renderWizard();
-    const input = await screen.findByLabelText("迁移包路径（.zam）");
-    fireEvent.change(input, { target: { value: "D:\\迁移包\\codex-迁移包-20260817.zam" } });
+    // 经选择卡片指定旧版 codex 包路径（PathPicker 点击选文件）
+    vi.mocked(pickPackage).mockImplementation(async () => "D:\\迁移包\\codex-迁移包-20260817.zam");
+    fireEvent.click(await screen.findByRole("button", { name: "迁移包路径（.zam）" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "迁移包路径（.zam）" })).toHaveTextContent(
+        "codex-迁移包-20260817.zam",
+      );
+    });
     fireEvent.click(screen.getByRole("button", { name: "打开并校验" }));
     await screen.findByText("包校验通过");
     // 打包时记录的警告含 codex main_config 的 token 警告（mock 与后端 packer 同源生成）
@@ -195,7 +217,7 @@ describe("解包向导：dry-run 计划确认（第 4 步）", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择恢复模式" }));
     // 恢复目标根目录按包内档案推导为 ~/.codex；提示文字标注"旧版档案"（不误显示回退的 ZCode 名）
-    expect(await screen.findByLabelText("恢复目标目录")).toHaveValue(
+    expect(await screen.findByRole("button", { name: "恢复目标目录" })).toHaveTextContent(
       "C:\\Users\\demo\\.codex",
     );
     expect(screen.getByText(/codex（旧版档案）/)).toBeInTheDocument();
@@ -205,6 +227,36 @@ describe("解包向导：dry-run 计划确认（第 4 步）", () => {
       .mocked(apiCall)
       .mock.calls.find((c) => c[0] === COMMANDS.planApply);
     expect(planCall?.[1]).toMatchObject({ targetRoot: "C:\\Users\\demo\\.codex" });
+  });
+  it("执行失败后提供重新执行与返回修改，重试可成功（H1 锁）", async () => {
+    // 第一次 execute_apply 失败，其余回落原 mock
+    const realImpl = vi.mocked(apiCall).getMockImplementation()!;
+    let failOnce = true;
+    vi.mocked(apiCall).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === COMMANDS.executeApply && failOnce) {
+        failOnce = false;
+        throw { code: "internal", message: "写入失败（模拟）" };
+      }
+      return realImpl(cmd, args);
+    }) as typeof apiCall);
+    try {
+      await gotoPlanStep();
+      const execBtn = await screen.findByRole("button", { name: "执行解包" });
+      await waitFor(() => expect(execBtn).toBeEnabled());
+      fireEvent.click(execBtn);
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "确认执行" }));
+      // 失败横幅 + 两个动作（重试 / 返回修改），不再出现"等待执行完成…"死按钮
+      expect(await screen.findByText(/执行失败/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "重新执行" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "返回修改" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /等待执行完成/ })).not.toBeInTheDocument();
+      // 重新执行成功 → 报告出现
+      fireEvent.click(screen.getByRole("button", { name: "重新执行" }));
+      await screen.findByText("解包完成");
+    } finally {
+      vi.mocked(apiCall).mockImplementation(realImpl);
+    }
   });
 });
 

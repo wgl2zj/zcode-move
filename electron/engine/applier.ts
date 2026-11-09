@@ -8,6 +8,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { AppError } from "./error";
 import { mergeStrategyFor, mergeText, readStrictUtf8, type MergePreview } from "./merge";
+import { throwIfCancelled, type EngineOpts } from "./opts";
 import type { ProgressFn } from "./progress";
 import { readManifest, type Manifest } from "./packer";
 import { sha256File } from "./scanner";
@@ -96,12 +97,13 @@ function sha256Text(text: string): string {
 /** 打开并完整校验包（manifest 解析 + 逐文件哈希校验）。
  *  性能约束：归档全程只打开一次——每文件重开归档会各自完整解析一遍中央目录，
  *  文件数 N 时总代价 O(N²)；统一流式哈希，峰值内存不随包内文件增大。 */
-export async function openPackage(packagePath: string, progress: ProgressFn): Promise<Manifest> {
+export async function openPackage(packagePath: string, progress: ProgressFn, opts?: EngineOpts): Promise<Manifest> {
   const manifest = await readManifest(packagePath);
   const total = manifest.files.length;
   const opened = await openZip(packagePath, "打开迁移包失败");
   try {
     for (let idx = 0; idx < manifest.files.length; idx += 1) {
+      throwIfCancelled(opts);
       const mf = manifest.files[idx];
       const entry = requireEntry(opened, mf.path, "包内缺少 ");
       const stream = await entryStream(opened.zip, entry);
@@ -216,6 +218,7 @@ export async function makePlan(
   mode: ApplyMode,
   conflictOverrides: string[],
   mergeRelPaths: string[] = [],
+  opts?: EngineOpts,
 ): Promise<ApplyPlan> {
   const digest = packageDigest(manifest);
   const wantMerge = new Set(mergeRelPaths);
@@ -224,6 +227,7 @@ export async function makePlan(
   try {
     const items: PlanItem[] = [];
     for (const mf of manifest.files) {
+      throwIfCancelled(opts);
       const abs = safeJoin(targetRoot, mf.target_rel);
       // 目标哈希只算一次（存在时），判定与展示复用
       const targetExists = (await fsp.stat(abs).then((s) => s.isFile()).catch(() => false));
@@ -309,9 +313,10 @@ export async function planApply(
   conflictOverrides: string[],
   progress: ProgressFn,
   mergeRelPaths: string[] = [],
+  opts?: EngineOpts,
 ): Promise<ApplyPlan> {
-  const manifest = await openPackage(packagePath, progress);
-  return makePlan(packagePath, manifest, targetRoot, mode, conflictOverrides, mergeRelPaths);
+  const manifest = await openPackage(packagePath, progress, opts);
+  return makePlan(packagePath, manifest, targetRoot, mode, conflictOverrides, mergeRelPaths, opts);
 }
 
 /** 执行已确认的计划到指定目标根（executeApply 的可指定目标版本，测试与自定义解包路径共用）。
@@ -325,7 +330,9 @@ export async function executeApplyTo(
   plan: ApplyPlan,
   targetRoot: string,
   progress: ProgressFn,
+  opts?: EngineOpts,
 ): Promise<ApplyReport> {
+  throwIfCancelled(opts);
   if (!fs.existsSync(plan.package_path) || !fs.statSync(plan.package_path).isFile()) {
     throw new AppError("invalid_package", `迁移包不存在：${plan.package_path}`);
   }
@@ -337,7 +344,7 @@ export async function executeApplyTo(
     throw new AppError("plan_not_confirmed", "计划令牌校验失败：计划内容与令牌不符，请重新生成计划");
   }
   // 第二道：独立重放核对（合并清单一并重放——合并预览哈希随之重算，包或目标变化即失配）
-  const replay = await makePlan(plan.package_path, manifest, targetRoot, plan.mode, plan.confirmed_overrides, plan.merge_rel_paths ?? []);
+  const replay = await makePlan(plan.package_path, manifest, targetRoot, plan.mode, plan.confirmed_overrides, plan.merge_rel_paths ?? [], opts);
   if (replay.plan_token !== plan.plan_token || replay.package_digest !== plan.package_digest) {
     throw new AppError("plan_not_confirmed", "计划令牌校验失败：包或目标已变化，请重新生成计划");
   }
@@ -358,6 +365,7 @@ export async function executeApplyTo(
   const opened = await openZip(plan.package_path, "包损坏");
   try {
     for (let idx = 0; idx < plan.items.length; idx += 1) {
+      throwIfCancelled(opts);
       const item = plan.items[idx];
       if (item.action === "create" || item.action === "replace") {
         const abs = safeJoin(targetRoot, item.target_rel);
@@ -420,8 +428,8 @@ export async function executeApplyTo(
 }
 
 /** 执行已确认的计划（目标根取 plan.target_root）。 */
-export function executeApply(plan: ApplyPlan, progress: ProgressFn): Promise<ApplyReport> {
-  return executeApplyTo(plan, plan.target_root, progress);
+export function executeApply(plan: ApplyPlan, progress: ProgressFn, opts?: EngineOpts): Promise<ApplyReport> {
+  return executeApplyTo(plan, plan.target_root, progress, opts);
 }
 
 /** 执行期重算合并内容并校验与计划预览一致（确定性合并的性质）：

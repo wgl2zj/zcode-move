@@ -38,10 +38,12 @@ describe("打包向导步骤流转", () => {
   it("四步可顺序前进，也可回退到上一步", async () => {
     renderWizard();
 
-    // 第 1 步：等待档案卡加载（list_profiles mock）
+    // 第 1 步：等待档案卡加载（list_profiles mock）；资产根目录为选择卡片（显示默认根）
     const heading = await screen.findByRole("heading", { name: /ZCode 资产档案/ });
     expect(heading).toBeInTheDocument();
-    expect(screen.getByLabelText("资产根目录")).toHaveValue("C:\\Users\\demo\\.zcode");
+    expect(screen.getByRole("button", { name: "资产根目录" })).toHaveTextContent(
+      "C:\\Users\\demo\\.zcode",
+    );
 
     // 前进到第 2 步：触发 scan_assets（先等数据行出现再取表格断言）
     fireEvent.click(screen.getByRole("button", { name: "下一步：扫描盘点" }));
@@ -56,17 +58,18 @@ describe("打包向导步骤流转", () => {
     expect(screen.getByRole("button", { name: "我已退出，重新检测" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "跳过该库继续" })).toBeInTheDocument();
 
-    // 前进到第 3 步：档位三卡可见
+    // 前进到第 3 步：档位三卡可见；输出 = 目录选择卡片 + 文件名输入
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择档位与输出" }));
     expect(await screen.findByText("推荐（纯资产）")).toBeInTheDocument();
     expect(screen.getByText("完整（含会话历史）")).toBeInTheDocument();
-    expect(screen.getByLabelText("迁移包输出路径")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "迁移包保存到哪个文件夹" })).toBeInTheDocument();
+    expect(screen.getByLabelText("迁移包文件名")).toBeInTheDocument();
 
     // 回退到第 2 步，再回退到第 1 步
     fireEvent.click(screen.getByRole("button", { name: "上一步" }));
     expect(await screen.findByRole("table")).toHaveTextContent("会话历史库");
     fireEvent.click(screen.getByRole("button", { name: "上一步" }));
-    expect(await screen.findByLabelText("资产根目录")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "资产根目录" })).toBeInTheDocument();
   });
 
   it("阻断类别可跳过：跳过标记后横幅消失，状态变为已跳过", async () => {
@@ -95,7 +98,7 @@ describe("打包向导步骤流转", () => {
     expect(missingRow).toHaveTextContent("—");
   });
 
-  it("输出路径「浏览…」选择目录后拼回建议文件名", async () => {
+  it("输出目录选择卡片：点击选择目录后回填（pickDirectory）", async () => {
     // 宏任务模拟选目录耗时（微任务 setState 在 jsdom+React19 下不可见，项目 mock 均走 delay 宏任务）
     vi.mocked(pickDirectory).mockImplementation(async () => {
       await new Promise((r) => setTimeout(r, 0));
@@ -106,12 +109,12 @@ describe("打包向导步骤流转", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步：扫描盘点" }));
     await screen.findByText(/全局规则/);
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择档位与输出" }));
-    const input = await screen.findByLabelText("迁移包输出路径");
-    fireEvent.click(screen.getByRole("button", { name: "浏览…" }));
+    await screen.findByText("推荐（纯资产）");
+    fireEvent.click(screen.getByRole("button", { name: "迁移包保存到哪个文件夹" }));
     await waitFor(() => {
-      const value = (input as HTMLInputElement).value;
-      expect(value).toMatch(/^E:\\U盘\//);
-      expect(value).toMatch(/\.zam$/);
+      expect(screen.getByRole("button", { name: "迁移包保存到哪个文件夹" })).toHaveTextContent(
+        "E:\\U盘",
+      );
     });
   });
 });
@@ -137,14 +140,52 @@ describe("打包向导：档案选择（仅 ZCode，产品收窄）", () => {
     expect(options.some((o) => o.textContent?.includes("Claude"))).toBe(false);
   });
 
-  it("建议输出文件名按档案动态生成（zcode-迁移包-日期.zam）", async () => {
+  it("建议输出文件名按档案动态生成（zcode-迁移包-日期时分秒.zam）", async () => {
     renderWizard();
     await screen.findByRole("heading", { name: /ZCode 资产档案/ });
     fireEvent.click(screen.getByRole("button", { name: "下一步：扫描盘点" }));
     await screen.findByText(/全局规则/);
     fireEvent.click(screen.getByRole("button", { name: "下一步：选择档位与输出" }));
-    const output = (await screen.findByLabelText("迁移包输出路径")) as HTMLInputElement;
-    expect(output.value).toMatch(/\/zcode-迁移包-\d{8}\.zam$/);
+    const output = (await screen.findByLabelText("迁移包文件名")) as HTMLInputElement;
+    expect(output.value).toMatch(/^zcode-迁移包-\d{8}-\d{6}\.zam$/);
+  });
+
+  it("输出目标已存在时先弹覆盖确认，确认后才发起打包（H3 锁）", async () => {
+    // 只拦截 path_exists → true，其余命令回落到原 mock 实现
+    const realImpl = vi.mocked(apiCall).getMockImplementation()!;
+    vi.mocked(apiCall).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === COMMANDS.pathExists) return true;
+      return realImpl(cmd, args);
+    }) as typeof apiCall);
+    try {
+      renderWizard();
+      await screen.findByRole("heading", { name: /ZCode 资产档案/ });
+      fireEvent.click(screen.getByRole("button", { name: "下一步：扫描盘点" }));
+      await screen.findByText(/全局规则/);
+      fireEvent.click(screen.getByRole("button", { name: "下一步：选择档位与输出" }));
+      await screen.findByText("推荐（纯资产）");
+      fireEvent.click(screen.getByRole("button", { name: "开始打包" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent("覆盖已存在的迁移包");
+      // 确认前不发起打包
+      expect(
+        vi.mocked(apiCall).mock.calls.some((c) => c[0] === COMMANDS.packAssets),
+      ).toBe(false);
+      fireEvent.click(within(dialog).getByRole("button", { name: "覆盖并继续" }));
+      await waitFor(() => {
+        const call = vi
+          .mocked(apiCall)
+          .mock.calls.find((c) => c[0] === COMMANDS.packAssets);
+        expect(call).toBeTruthy();
+        // 输出路径 = 选择目录 + 建议文件名（时分秒版；目录保持 mock 默认 Downloads）
+        expect((call?.[1] as { outputPath: string }).outputPath).toMatch(
+          /^C:\\Users\\demo\\Downloads\/zcode-迁移包-\d{8}-\d{6}\.zam$/,
+        );
+      });
+      await screen.findByText("打包完成");
+    } finally {
+      vi.mocked(apiCall).mockImplementation(realImpl);
+    }
   });
 
   it("ZCode 推荐档含两个凭据类别，确认步骤出现点名具体字段的凭据横幅（v2）", async () => {

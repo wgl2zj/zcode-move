@@ -9,6 +9,7 @@ import path from "node:path";
 import { Transform } from "node:stream";
 import * as yazl from "yazl";
 import { AppError } from "./error";
+import { throwIfCancelled, type EngineOpts } from "./opts";
 import type { ProgressFn } from "./progress";
 import { categoryOf, type Profile } from "./profile/types";
 import { scanSelected, type FileKind, type ScanReport } from "./scanner";
@@ -130,6 +131,7 @@ export async function pack(
   warnings: string[],
   appVersion: string,
   progress: ProgressFn,
+  opts?: EngineOpts,
 ): Promise<PackResult> {
   try {
     if (!(await fsp.stat(root)).isDirectory()) {
@@ -139,7 +141,7 @@ export async function pack(
     if (e instanceof AppError) throw e;
     throw new AppError("path_setup", `打包根目录不存在：${root}`);
   }
-  const report = await scanSelected(profile, root, categoryIds);
+  const report = await scanSelected(profile, root, categoryIds, opts);
 
   // 阻断校验：选中的 SQLite 类别若检测到 WAL/SHM，拒绝打包
   for (const catId of categoryIds) {
@@ -211,8 +213,10 @@ export async function pack(
     zip.outputStream.on("error", (e) => reject(new AppError("io", e.message)));
   });
 
+  let completed = false;
   try {
     for (let idx = 0; idx < manifest.files.length; idx += 1) {
+      throwIfCancelled(opts);
       const mf = manifest.files[idx];
       // 优先物理源路径（链接内文件）；无映射时回退 path.join（兼容反序列化的报告）
       const abs = sourcePaths.get(mf.target_rel) ?? path.join(root, mf.target_rel);
@@ -245,8 +249,13 @@ export async function pack(
       }),
       writeFailure,
     ]);
+    completed = true;
   } finally {
     out.destroy();
+    if (!completed) {
+      // 失败/取消不留半成品包：此前中断会静默留下不完整的 .zam（2026-11-09 审查补）
+      await fsp.unlink(outputPath).catch(() => undefined);
+    }
   }
 
   const packageBytes = (await fsp.stat(outputPath)).size;

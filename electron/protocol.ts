@@ -15,6 +15,11 @@ export const COMMANDS = {
   applyPathMappings: "apply_path_mappings",
   loadSettings: "load_settings",
   saveSettings: "save_settings",
+  cancelTask: "cancel_task",
+  pathExists: "path_exists",
+  revealPath: "reveal_path",
+  copyText: "copy_text",
+  cleanupEarliestBackup: "cleanup_earliest_backup",
 } as const;
 
 /** 后端统一错误（AppError 序列化形态）。 */

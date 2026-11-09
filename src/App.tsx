@@ -23,7 +23,11 @@ function App() {
   const [route, setRoute] = useState<Route>("home");
   // 向导从首页/导航重新进入时重置内部状态（key 变化触发重挂载）
   const [wizardEpoch, setWizardEpoch] = useState(0);
+  // 长任务执行中锁定导航（2026-11-09 审查 H2）：离开会让任务失去界面跟踪，
+  // 且重进向导可对同一目标重复发起任务；出口是进度区的「取消」按钮
+  const [taskBusy, setTaskBusy] = useState(false);
   const navigate = (r: Route) => {
+    if (taskBusy) return;
     if (r === route) return;
     setWizardEpoch((n) => n + 1);
     setRoute(r);
@@ -44,6 +48,8 @@ function App() {
                   type="button"
                   className="nav-item"
                   aria-current={route === item.id ? "page" : undefined}
+                  disabled={taskBusy}
+                  title={taskBusy ? "任务执行中，暂不能切换页面（可先取消任务）" : undefined}
                   onClick={() => navigate(item.id)}
                 >
                   {item.icon({ size: 18 })}
@@ -56,10 +62,18 @@ function App() {
         <main className="content">
           {route === "home" && <HomePage onNavigate={navigate} />}
           {route === "pack" && (
-            <PackWizard key={`pack-${wizardEpoch}`} onExit={() => navigate("home")} />
+            <PackWizard
+              key={`pack-${wizardEpoch}`}
+              onExit={() => navigate("home")}
+              onBusyChange={setTaskBusy}
+            />
           )}
           {route === "unpack" && (
-            <UnpackWizard key={`unpack-${wizardEpoch}`} onExit={() => navigate("home")} />
+            <UnpackWizard
+              key={`unpack-${wizardEpoch}`}
+              onExit={() => navigate("home")}
+              onBusyChange={setTaskBusy}
+            />
           )}
           {route === "settings" && <SettingsPage />}
         </main>

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import {
+  BACKUP_DIR,
   executeApply,
   openPackage,
   planApply,
@@ -14,6 +15,7 @@ import {
   type ApplyReport,
 } from "./engine/applier";
 import { AppError } from "./engine/error";
+import type { EngineOpts } from "./engine/opts";
 import { pack, readManifest, type PackResult } from "./engine/packer";
 import {
   applyMappings,
@@ -59,9 +61,9 @@ function requireProfile(profileId: string): Profile {
 }
 
 /** 扫描盘点（完整档含数百 MB 库的全量哈希；root 缺省用档案默认根）。 */
-export async function scanAssets(profileId: string, root?: string): Promise<ScanReport> {
+export async function scanAssets(profileId: string, root?: string, opts?: EngineOpts): Promise<ScanReport> {
   const profile = requireProfile(profileId);
-  return scan(profile, root && root.length > 0 ? root : defaultRoot(profile));
+  return scan(profile, root && root.length > 0 ? root : defaultRoot(profile), opts);
 }
 
 /** 打包参数（pack_assets）。 */
@@ -75,7 +77,7 @@ export interface PackAssetsArgs {
   appVersion: string;
 }
 
-export function packAssets(args: PackAssetsArgs, progress: ProgressFn): Promise<PackResult> {
+export function packAssets(args: PackAssetsArgs, progress: ProgressFn, opts?: EngineOpts): Promise<PackResult> {
   const profile = requireProfile(args.profileId);
   return pack(
     profile,
@@ -86,12 +88,13 @@ export function packAssets(args: PackAssetsArgs, progress: ProgressFn): Promise<
     args.warnings,
     args.appVersion,
     progress,
+    opts,
   );
 }
 
 /** 打开并校验包（逐文件哈希校验）。 */
-export function openPackageCmd(packagePath: string, progress: ProgressFn) {
-  return openPackage(packagePath, progress);
+export function openPackageCmd(packagePath: string, progress: ProgressFn, opts?: EngineOpts) {
+  return openPackage(packagePath, progress, opts);
 }
 
 /** 解包目标根目录解析：显式传入（非空）优先；否则读包内档案推导该软件的本机资产目录
@@ -121,24 +124,26 @@ export async function planApplyCmd(
     mergeRelPaths?: string[];
   },
   progress: ProgressFn,
+  opts?: EngineOpts,
 ): Promise<ApplyPlan> {
   const target = await resolveTargetRoot(args.path, args.targetRoot);
-  return planApply(args.path, target, args.mode, args.conflictOverrides ?? [], progress, args.mergeRelPaths ?? []);
+  return planApply(args.path, target, args.mode, args.conflictOverrides ?? [], progress, args.mergeRelPaths ?? [], opts);
 }
 
 /** 执行已确认计划（令牌双道校验在引擎内完成）。 */
-export function executeApplyCmd(plan: ApplyPlan, progress: ProgressFn): Promise<ApplyReport> {
-  return executeApply(plan, progress);
+export function executeApplyCmd(plan: ApplyPlan, progress: ProgressFn, opts?: EngineOpts): Promise<ApplyReport> {
+  return executeApply(plan, progress, opts);
 }
 
 /** 检出旧机路径映射建议（读已解包目标树，纯只读）。 */
 export async function detectPathMappingsCmd(
   packagePath: string,
   targetRoot?: string,
+  opts?: EngineOpts,
 ): Promise<DetectResult> {
   const manifest = await readManifest(packagePath);
   const target = await resolveTargetRoot(packagePath, targetRoot);
-  return detect(target, manifest);
+  return detect(target, manifest, opts);
 }
 
 /** 路径映射入参。 */
@@ -152,12 +157,69 @@ export async function applyPathMappingsCmd(
   packagePath: string,
   mappings: PathMappingIn[],
   targetRoot?: string,
+  opts?: EngineOpts,
 ): Promise<PathFixReport> {
   const manifest = await readManifest(packagePath);
   const target = await resolveTargetRoot(packagePath, targetRoot);
   const pairs = mappings.map((m) => [m.old, m.new] as [string, string]);
   // 备份固定开启：任何替换前必备份是决策红线，命令层不留关闭口子
-  return applyMappings(target, manifest, pairs, true);
+  return applyMappings(target, manifest, pairs, true, opts);
+}
+
+/** 探测路径是否存在（打包输出查重用；不区分文件/目录）。 */
+export async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fsp.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 备份清理结果摘要。 */
+export interface BackupCleanupResult {
+  /** 被删除的备份目录名（时间戳）。 */
+  removed_dir: string;
+  /** 删除的文件数（递归计数）。 */
+  removed_files: number;
+  /** 清理后剩余的合格备份数。 */
+  remaining: number;
+}
+
+/** 备份目录名的合法形态（与 applier.localStamp 的 YYYYMMDD-HHMMSS 对齐；
+ *  只认这个形态，任何其他名字都不动——防误删非备份内容）。 */
+const BACKUP_STAMP_RE = /^\d{8}-\d{6}$/;
+
+async function countFilesRecursive(dir: string): Promise<number> {
+  let n = 0;
+  for (const ent of await fsp.readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) n += await countFilesRecursive(full);
+    else if (ent.isFile()) n += 1;
+  }
+  return n;
+}
+
+/** 清理最早一次历史备份（备份超限警告的"一键清理"后端；只删 targetRoot/zam-backups
+ *  下目录名形如 YYYYMMDD-HHMMSS 的字典序最早一个目录，删除不可恢复）。 */
+export async function cleanupEarliestBackup(targetRoot: string): Promise<BackupCleanupResult> {
+  const backupRoot = path.join(targetRoot, BACKUP_DIR);
+  let stamps: string[] = [];
+  try {
+    const entries = await fsp.readdir(backupRoot, { withFileTypes: true });
+    stamps = entries.filter((e) => e.isDirectory()).map((e) => e.name).filter((n) => BACKUP_STAMP_RE.test(n));
+  } catch {
+    throw new AppError("path_setup", `备份目录不存在：${backupRoot}`);
+  }
+  if (stamps.length === 0) {
+    throw new AppError("path_setup", "备份目录下没有可自动清理的历史备份");
+  }
+  stamps.sort(); // 定长格式，字典序 = 时间序
+  const earliest = stamps[0];
+  const earliestAbs = path.join(backupRoot, earliest);
+  const removedFiles = await countFilesRecursive(earliestAbs);
+  await fsp.rm(earliestAbs, { recursive: true, force: true });
+  return { removed_dir: earliest, removed_files: removedFiles, remaining: stamps.length - 1 };
 }
 
 /** 设置文件路径（userData 目录下；由 main.ts 提供 userData）。 */

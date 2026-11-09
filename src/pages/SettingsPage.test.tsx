@@ -37,32 +37,32 @@ describe("设置页", () => {
 
   it("加载设置并展示默认输出目录", async () => {
     renderPage();
-    const input = await screen.findByLabelText("迁移包默认保存到");
+    const picker = await screen.findByRole("button", { name: "迁移包默认保存到" });
     // 断言放 waitFor 内重试：loadSettings 走 mock 宏任务延迟，直接断言有加载竞态
-    await waitFor(() => expect(input).toHaveValue("C:\\Users\\demo\\Downloads"));
+    await waitFor(() => expect(picker).toHaveTextContent("C:\\Users\\demo\\Downloads"));
   });
 
-  it("「浏览…」选择目录后回填并进入未保存状态", async () => {
+  it("选择卡片选目录后回填并进入未保存状态", async () => {
     // 宏任务模拟选目录耗时（微任务 setState 在 jsdom+React19 下不可见，项目 mock 均走 delay 宏任务）
     vi.mocked(pickDirectory).mockImplementation(async () => {
       await new Promise((r) => setTimeout(r, 0));
       return "E:\\U盘备份";
     });
     renderPage();
-    const input = await screen.findByLabelText("迁移包默认保存到");
-    fireEvent.click(screen.getByRole("button", { name: "浏览…" }));
-    await waitFor(() => expect(input).toHaveValue("E:\\U盘备份"));
+    const picker = await screen.findByRole("button", { name: "迁移包默认保存到" });
+    fireEvent.click(picker);
+    await waitFor(() => expect(picker).toHaveTextContent("E:\\U盘备份"));
     expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
   });
 
-  it("「浏览…」取消（返回 null）不改动当前值", async () => {
+  it("选择卡片取消（返回 null）不改动当前值", async () => {
     renderPage();
-    const input = await screen.findByLabelText("迁移包默认保存到");
+    const picker = await screen.findByRole("button", { name: "迁移包默认保存到" });
     // 先等初始加载完成（消加载竞态），再验证取消不改动
-    await waitFor(() => expect(input).toHaveValue("C:\\Users\\demo\\Downloads"));
-    fireEvent.click(screen.getByRole("button", { name: "浏览…" }));
+    await waitFor(() => expect(picker).toHaveTextContent("C:\\Users\\demo\\Downloads"));
+    fireEvent.click(picker);
     await waitFor(() => expect(pickDirectory).toHaveBeenCalled());
-    expect(input).toHaveValue("C:\\Users\\demo\\Downloads");
+    expect(picker).toHaveTextContent("C:\\Users\\demo\\Downloads");
   });
 
   it("保存携带新目录调用 save_settings", async () => {
@@ -71,8 +71,8 @@ describe("设置页", () => {
       return "E:\\U盘备份";
     });
     renderPage();
-    await screen.findByLabelText("迁移包默认保存到");
-    fireEvent.click(screen.getByRole("button", { name: "浏览…" }));
+    const picker = await screen.findByRole("button", { name: "迁移包默认保存到" });
+    fireEvent.click(picker);
     const saveBtn = await screen.findByRole("button", { name: "保存设置" });
     await waitFor(() => expect(saveBtn).toBeEnabled());
     fireEvent.click(saveBtn);
