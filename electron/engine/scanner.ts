@@ -9,6 +9,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { AppError } from "./error";
 import { throwIfCancelled, type EngineOpts } from "./opts";
+import type { ProgressFn } from "./progress";
 import type { AssetCategory, PathRule, Profile } from "./profile/types";
 
 /** 文件种类（决定解包与压缩处理方式；序列化契约：小写字面量）。 */
@@ -299,13 +300,22 @@ async function assertRootIsDir(root: string): Promise<void> {
   throw new AppError("path_setup", `扫描根目录不存在：${root}`);
 }
 
-/** 按档案扫描根目录，产出完整盘点报告（UI 盘点页数据源：全部类别、含哈希）。 */
-export async function scan(profile: Profile, root: string, opts?: EngineOpts): Promise<ScanReport> {
+/** 按档案扫描根目录，产出完整盘点报告（UI 盘点页数据源：全部类别、含哈希）。
+ *  `progress` 每完成一个类别回调一次（message 为类别显示名）——盘点含数 GB 大库时
+ *  可能耗时数分钟，逐类别进度让 UI 能区分"正在推进"与"卡死"（2026-11-09 用户反馈）。 */
+export async function scan(
+  profile: Profile,
+  root: string,
+  progress?: ProgressFn,
+  opts?: EngineOpts,
+): Promise<ScanReport> {
   await assertRootIsDir(root);
   const categories: CategoryReport[] = [];
-  for (const cat of profile.categories) {
+  const total = profile.categories.length;
+  for (let i = 0; i < total; i += 1) {
     throwIfCancelled(opts);
-    categories.push(await scanCategory(root, cat, true, opts));
+    categories.push(await scanCategory(root, profile.categories[i], true, opts));
+    progress?.(i + 1, total, profile.categories[i].display_name);
   }
   return { profile_id: profile.id, profile_version: profile.version, root, categories };
 }

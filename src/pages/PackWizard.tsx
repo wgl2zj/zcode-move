@@ -83,7 +83,8 @@ export function PackWizard(props: {
   // 第 2 步：盘点
   const [scan, setScan] = useState<ScanReport | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<AppErrorPayload | null>(null);
+  const [scanProgress, setScanProgress] = useState<ProgressPayload | null>(null);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   // 第 3 步：档位与输出（目录用选择卡片，文件名单独填写）
@@ -116,6 +117,7 @@ export function PackWizard(props: {
 
   useProgress((p) => {
     if (p.task === "pack") setProgress(p);
+    if (p.task === "scan") setScanProgress(p);
   });
 
   /** 当前选中档案：默认取列表第一个；类别表/默认根/版本号/包名全部跟随它。 */
@@ -178,6 +180,7 @@ export function PackWizard(props: {
     if (!profile) return;
     setScanning(true);
     setScanError(null);
+    setScanProgress(null);
     apiCall<ScanReport>(COMMANDS.scanAssets, { profileId: profile.id, root })
       .then((report) => {
         setScan(report);
@@ -191,7 +194,9 @@ export function PackWizard(props: {
         });
       })
       .catch((e: unknown) => {
-        setScanError(isAppError(e) ? e.message : "扫描失败，请检查根目录是否正确");
+        setScanError(
+          isAppError(e) ? e : { code: "internal", message: "扫描失败，请检查根目录是否正确" },
+        );
       })
       .finally(() => setScanning(false));
   };
@@ -496,9 +501,33 @@ export function PackWizard(props: {
             </Banner>
           ))}
           {scanError && (
-            <Banner kind="danger" title="扫描失败" onClose={() => setScanError(null)}>
-              {scanError}
+            <Banner
+              kind={scanError.code === "task_cancelled" ? "warning" : "danger"}
+              title={scanError.code === "task_cancelled" ? "已取消盘点" : "扫描失败"}
+              onClose={() => setScanError(null)}
+            >
+              {scanError.code === "task_cancelled"
+                ? "本次盘点已取消；可点「我已退出，重新检测」或回第一步再进重新盘点。"
+                : scanError.message}
             </Banner>
+          )}
+          {scanning && (
+            <div className="card stack">
+              <h2 className="card-title">正在盘点</h2>
+              <ProgressBar progress={scanProgress} idleText="正在盘点资产…" />
+              <p className="secondary">
+                {scanProgress
+                  ? `正在盘点第 ${scanProgress.current}/${scanProgress.total} 类：${scanProgress.message}`
+                  : "正在读取资产目录…"}
+                （首次盘点含会话历史等大库时可能需要一两分钟，进度会逐类推进）
+              </p>
+              <div className="row">
+                <button type="button" className="btn" onClick={() => setConfirmCancel(true)}>
+                  取消盘点
+                </button>
+                <span className="muted">取消后可随时重新盘点，不影响已选内容。</span>
+              </div>
+            </div>
           )}
 
           <div className="table-shell">
@@ -902,15 +931,18 @@ export function PackWizard(props: {
         onCancel={() => setPendingOverwrite(null)}
       />
 
-      {/* 取消打包确认 */}
+      {/* 取消当前长任务确认（盘点/打包共用） */}
       <ConfirmDialog
         open={confirmCancel}
-        title="取消本次打包？"
+        title="取消当前操作？"
         points={[
-          { label: "影响", text: "放弃当前打包进度；已写入的部分包文件会被自动删除，不留半成品。" },
-          { label: "之后", text: "可返回第 3 步修改后重新打包。" },
+          {
+            label: "影响",
+            text: "放弃当前进行中的操作；盘点立即停止，打包则连同已写入的部分包文件一并删除、不留半成品。",
+          },
+          { label: "之后", text: "可重新盘点，或返回修改后重新打包。" },
         ]}
-        confirmText="取消打包"
+        confirmText="取消操作"
         onConfirm={() => void doCancel()}
         onCancel={() => setConfirmCancel(false)}
       />

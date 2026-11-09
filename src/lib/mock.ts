@@ -609,7 +609,18 @@ function mockRoute<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
       );
 
     case COMMANDS.scanAssets:
-      return delay(mockScan(String(args.profileId ?? "zcode")) as T);
+      // 演示逐类别盘点进度（与主进程 bridge 的 task="scan" 一致），让盘点中反馈可见
+      return runWithProgress(
+        "scan",
+        [
+          { phase: "scanning", message: "全局规则（AGENTS.md）" },
+          { phase: "scanning", message: "技能（skills/）" },
+          { phase: "scanning", message: "记忆库（cli/memories/）" },
+          { phase: "scanning", message: "会话历史库（cli/db/db.sqlite）" },
+          { phase: "scanning", message: "运行痕迹统计（约 4GB+，只统计不读内容）" },
+        ],
+        () => mockScan(String(args.profileId ?? "zcode")),
+      ) as Promise<T>;
 
     case COMMANDS.packAssets: {
       const profileId = String(args.profileId ?? "zcode");

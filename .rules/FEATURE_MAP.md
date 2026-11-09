@@ -273,6 +273,7 @@
 3. **打包半成品清理**：取消/写失败时输出 `.zam` 被 finally unlink，不留残骸（测试 `robustness_pack_cancel_removes_partial_package`）。
 4. **解包中断语义**：执行取消时已写文件保留、后续未写（测试 `robustness_execute_cancel_keeps_written_files`）；UI 横幅明示"已写入保持现状"。
 5. **前端锁导航**：向导 busy 期间侧边栏与"回到首页"禁用（`App.tsx` taskBusy），出口是各进度区的取消按钮（二次确认）。
+6. **盘点逐类别进度**（2026-11-09 用户反馈补）：scan_assets 挂 bridge（task=scan），引擎每完成一个类别回调一次（message=类别显示名）；盘点页显示进度条、当前类别名（“正在盘点第 X/N 类”）与耗时提示，并提供「取消盘点」按钮（测试 `robustness_scan_reports_per_category_progress` + 页面挂起用例锁定）。
 
 ### 反直觉/易误解（踩坑预警）
 - `handleTask` 与 `handle` 都是合法装配形态；`ipc.test.ts` 静态核对两者都认（0.3.0 起更新）。

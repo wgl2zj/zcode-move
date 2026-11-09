@@ -60,10 +60,15 @@ function requireProfile(profileId: string): Profile {
   return p;
 }
 
-/** 扫描盘点（完整档含数百 MB 库的全量哈希；root 缺省用档案默认根）。 */
-export async function scanAssets(profileId: string, root?: string, opts?: EngineOpts): Promise<ScanReport> {
+/** 扫描盘点（完整档含数百 MB 库的全量哈希；root 缺省用档案默认根；逐类别进度回调）。 */
+export async function scanAssets(
+  profileId: string,
+  root?: string,
+  progress?: ProgressFn,
+  opts?: EngineOpts,
+): Promise<ScanReport> {
   const profile = requireProfile(profileId);
-  return scan(profile, root && root.length > 0 ? root : defaultRoot(profile), opts);
+  return scan(profile, root && root.length > 0 ? root : defaultRoot(profile), progress, opts);
 }
 
 /** 打包参数（pack_assets）。 */

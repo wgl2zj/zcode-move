@@ -65,8 +65,20 @@ async function cancelledCode(p: Promise<unknown>): Promise<string> {
 
 it("robustness_scan_cancelled_immediately：开扫即取消 → task_cancelled", async () => {
   const root = await makeMiniTree();
-  const code = await cancelledCode(scan(miniProfile, root, { cancelled: () => true }));
+  const code = await cancelledCode(scan(miniProfile, root, undefined, { cancelled: () => true }));
   expect(code).toBe("task_cancelled");
+});
+
+it("robustness_scan_reports_per_category_progress：逐类别进度回调（次数=类别数，message 为类别名）", async () => {
+  const root = await makeMiniTree();
+  const calls: [number, number, string][] = [];
+  const report = await scan(
+    miniProfile,
+    root,
+    (done, total, name) => calls.push([done, total, name]),
+  );
+  expect(report.categories).toHaveLength(1);
+  expect(calls).toEqual([[1, 1, "文本"]]); // mini 档案单类别：完成即 1/1
 });
 
 it("robustness_pack_cancel_removes_partial_package：写包中途取消 → 半成品 .zam 被删除", async () => {

@@ -92,7 +92,12 @@ function registerCommands(): void {
   }));
   handle(COMMANDS.listProfiles, () => commands.listProfiles());
   handleTask(COMMANDS.scanAssets, (args, cancelled) =>
-    commands.scanAssets(str(args.profileId), optStr(args.root), { cancelled }),
+    commands.scanAssets(
+      str(args.profileId),
+      optStr(args.root),
+      bridge(emitProgress, "scan", "scanning"),
+      { cancelled },
+    ),
   );
   handleTask(COMMANDS.packAssets, (args, cancelled) => {
     // 打包前先发一条 scanning 进度（与 Rust 命令层行为一致，进度条能立即启动）

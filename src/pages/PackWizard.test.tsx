@@ -72,6 +72,33 @@ describe("打包向导步骤流转", () => {
     expect(await screen.findByRole("button", { name: "资产根目录" })).toBeInTheDocument();
   });
 
+  it("盘点进行中有进度反馈与取消入口（慢盘点挂起场景，2026-11-09 用户反馈锁定）", async () => {
+    // 只挂起 scan_assets（永不 resolve 模拟慢盘点），其余命令回落原 mock
+    const realImpl = vi.mocked(apiCall).getMockImplementation()!;
+    vi.mocked(apiCall).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === COMMANDS.scanAssets) {
+        return new Promise(() => undefined);
+      }
+      return realImpl(cmd, args);
+    }) as typeof apiCall);
+    try {
+      renderWizard();
+      await screen.findByRole("heading", { name: /ZCode 资产档案/ });
+      fireEvent.click(screen.getByRole("button", { name: "下一步：扫描盘点" }));
+      // 反馈卡可见：标题 + 状态行 + 取消按钮（不再只有表格里一行占位小字）
+      expect(await screen.findByText("正在盘点")).toBeInTheDocument();
+      expect(screen.getByText(/正在读取资产目录…/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "取消盘点" })).toBeInTheDocument();
+      // 取消入口 → 确认框
+      fireEvent.click(screen.getByRole("button", { name: "取消盘点" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent("取消当前操作");
+      fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    } finally {
+      vi.mocked(apiCall).mockImplementation(realImpl);
+    }
+  });
+
   it("阻断类别可跳过：跳过标记后横幅消失，状态变为已跳过", async () => {
     renderWizard();
     await screen.findByRole("heading", { name: /ZCode 资产档案/ });
