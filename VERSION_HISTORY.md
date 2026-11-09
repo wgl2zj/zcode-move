@@ -25,6 +25,12 @@
 | 2026-11-09 | 程序与开源仓库更名：AgentFerry → zcode-move（窗口/界面/安装包名/appId/桌面桥名统一），安装包按新名重建，仓库同步改名 wgl2zj/zcode-move | 提交见本轮 git log |
 | 2026-11-09 | 发布 v0.2.0：GitHub Release 附 Windows 安装包 zcode-move-Setup-0.2.0.exe | [Release v0.2.0](https://github.com/wgl2zj/zcode-move/releases/tag/v0.2.0) |
 
+## v0.2.1
+
+| 日期 | 事件 | 证据 |
+|---|---|---|
+| 2026-11-09 | 安装器改为向导式：oneClick=false 且允许自选安装目录（per-user 免管理员不变；静默安装 `/S /D=路径` 不受影响）；契约测试新增向导式三断言 | 提交见本轮 git log |
+
 ## 说明
 
 - 本仓库截至 2026-10-14 尚未打 tag、未发布 GitHub Release；上表事件均提取自 git 提交历史（`git log`）。

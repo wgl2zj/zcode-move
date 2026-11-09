@@ -11,6 +11,7 @@ interface BuildConfig {
   files: string[];
   electronDownload: { mirror: string };
   win: { target: Array<{ target: string; arch: string[] }>; artifactName: string };
+  nsis: { oneClick: boolean; perMachine: boolean; allowToChangeInstallationDirectory: boolean };
 }
 const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
   version: string;
@@ -33,6 +34,12 @@ describe("packaging_config_contract_locks_installer_shape", () => {
     );
     expect(hasNsisX64).toBe(true);
     expect(pkg.build.win.artifactName).toBe("zcode-move-Setup-${version}.exe");
+  });
+
+  it("安装器为向导式（非一键）：允许自选安装目录，保持 per-user 免管理员（0.2.1 起）", () => {
+    expect(pkg.build.nsis.oneClick).toBe(false);
+    expect(pkg.build.nsis.allowToChangeInstallationDirectory).toBe(true);
+    expect(pkg.build.nsis.perMachine).toBe(false);
   });
 
   it("appId/productName/输出目录已设，且输出目录被 gitignore 覆盖（产物不入库）", () => {

@@ -1,7 +1,7 @@
 {
   "name": "zcode-move",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "ZCode 配置备份与转移工具",
   "author": "wgl2zj",
   "repository": {
@@ -53,6 +53,11 @@
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "artifactName": "zcode-move-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     }
   }
 }
